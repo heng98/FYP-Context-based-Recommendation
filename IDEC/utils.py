@@ -1,9 +1,10 @@
 import torch
 import numpy as np
-from sklearn.utils.linear_assignment_ import linear_assignment
+# from sklearn.utils.linear_assignment_ import linear_assignment
+from scipy.optimize import linear_sum_assignment
 
 
-def similarity_q(z: torch.Tensor, u: torch.Tensor):
+def soft_assign(z: torch.Tensor, u: torch.Tensor):
     """
     Similarity between embedded point z_i and cluster center u_j
     Assume alpha = 1 as stated in paper
@@ -31,14 +32,16 @@ def cluster_acc(y_true, y_pred):
     # Return
         accuracy, in [0,1]
     """
-    y_true = y_true.astype(np.int64)
+
     assert y_pred.size == y_true.size
-    
+
     D = max(y_pred.max(), y_true.max()) + 1
     w = np.zeros((D, D), dtype=np.int64)
     for i in range(y_pred.size):
         w[y_pred[i], y_true[i]] += 1
     
-    ind = linear_assignment(w.max() - w)
-    return sum([w[i, j] for i, j in ind]) * 1.0 / y_pred.size
+    row_ind, col_ind = linear_sum_assignment(w.max() - w)
+    reassignment = dict(zip(row_ind, col_ind))
+    accuracy = w[row_ind, col_ind].sum() / y_pred.size
     
+    return reassignment, accuracy

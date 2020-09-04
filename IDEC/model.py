@@ -4,7 +4,7 @@ import torch.nn as nn
 from torch.nn.modules.activation import ReLU
 from torch.nn.modules.linear import Linear
 
-from utils import similarity_q
+from utils import soft_assign
 
 class AutoEncoder(nn.Module):
     def __init__(self, d_channel):
@@ -31,7 +31,7 @@ class AutoEncoder(nn.Module):
     
     def forward(self, x):
         z = self.encoder(x)
-        y = self.encoder(z)
+        y = self.decoder(z)
 
         return y, z
 
@@ -79,7 +79,7 @@ class DAE(nn.Module):
     
     def forward(self, x):
         z = self.encoder(x)
-        y = self.encoder(z)
+        y = self.decoder(z)
 
         return y, z
 
@@ -88,10 +88,10 @@ class IDEC(nn.Module):
         super(IDEC, self).__init__()
         self.ae = AutoEncoder(d_channel)
         self.cluster_layer = nn.Parameter(torch.Tensor(n_cluster, 10))
-        torch.nn.init.xavier_normal_(self.cluster_layer.data)
+        # torch.nn.init.xavier_normal_(self.cluster_layer.data)
 
     def forward(self, x):
         y, z = self.ae(x)
-        q = similarity_q(z, self.cluster_layer)
+        q = soft_assign(z, self.cluster_layer)
 
-        return y, q
+        return y, q, z
