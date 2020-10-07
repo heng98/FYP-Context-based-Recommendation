@@ -1,0 +1,25 @@
+from typing import Dict
+import torch
+import torch.nn as nn
+
+from transformers import AutoModel
+
+class EmebeddingModel(nn.Module):
+    def __init__(self, config) -> None:
+        super(EmebeddingModel, self).__init__()
+        self.config = config
+        self.model = AutoModel().from_pretrained(self.config.model_name, add_pooling_layer=False, return_dict=True)
+    
+    def forward(self, input: Dict[str, torch.Tensor]) -> torch.Tensor:
+        output = self.model(
+                        input_ids=input['input_ids'],
+                        attention_mask=input['attention_mask'],
+                        token_type_ids=input['token_type_ids'],
+                        position_ids=input['position_ids']
+                )
+        doc_embedding = output['last_hidden_state'][:, 0]
+
+        return doc_embedding
+        
+
+        
