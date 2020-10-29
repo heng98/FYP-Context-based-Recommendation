@@ -1,0 +1,7 @@
+Dataset
+venv
+**/pycache/
+**/__pycache__/
+__pycache__/
+processed_aan_data
+**.pth
