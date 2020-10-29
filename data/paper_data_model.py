@@ -4,13 +4,15 @@ import json
 
 @dataclass(frozen=True)
 class PaperDataModel:
+    ids : str
     title: str
     abstract: str
     citations: List[str]
     year: int
 
-    def _to_dict(self):
+    def to_dict(self):
         data = dict()
+        data['ids'] = self.ids
         data['title'] = self.title
         data['abstract'] = self.abstract
         data['citations'] = self.citations
@@ -19,4 +21,10 @@ class PaperDataModel:
         return data
 
     def to_json(self, path):
-        json.dump(self._to_dict(), open(path, 'w'), indent=4)
+        json.dump(self.to_dict(), open(path, 'w'), indent=2)
+
+    @classmethod
+    def from_json(cls, json_file):
+        data = json.load(open(json_file, 'r'))
+
+        return cls(data['ids'], data['title'], data['abstract'], data['citations'], data['year'])
