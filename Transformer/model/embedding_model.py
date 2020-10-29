@@ -4,9 +4,9 @@ import torch.nn as nn
 
 from transformers import AutoModel
 
-class EmebeddingModel(nn.Module):
+class EmbeddingModel(nn.Module):
     def __init__(self, config) -> None:
-        super(EmebeddingModel, self).__init__()
+        super(EmbeddingModel, self).__init__()
         self.config = config
         self.model = AutoModel().from_pretrained(self.config.model_name, add_pooling_layer=False, return_dict=True)
     
