@@ -1,7 +1,9 @@
 import torch
 import numpy as np
-# from sklearn.utils.linear_assignment_ import linear_assignment
+from sklearn.manifold import TSNE
 from scipy.optimize import linear_sum_assignment
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 
 def soft_assign(z: torch.Tensor, u: torch.Tensor):
@@ -45,3 +47,10 @@ def cluster_acc(y_true, y_pred):
     accuracy = w[row_ind, col_ind].sum() / y_pred.size
     
     return reassignment, accuracy
+
+def tsne(data, y_true, path):
+    tsne = TSNE(n_jobs=6)
+    reduction = tsne.fit_transform(data)
+    plt.figure(figsize=(19.2, 10.8))
+    sns.scatterplot(x=reduction[:, 0], y=reduction[:, 1], hue=y_true, legend='full', marker=',')
+    plt.savefig(path)

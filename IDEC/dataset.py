@@ -22,4 +22,4 @@ class NewsGroupDataset(Dataset):
         return len(self.Y)
 
     def __getitem__(self, index):
-        return self.X[index], self.Y[index]   
+        return self.X[index], self.Y[index], torch.LongTensor([index])   
