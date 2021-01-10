@@ -5,3 +5,4 @@ venv
 __pycache__/
 processed_aan_data
 **.pth
+.vscode

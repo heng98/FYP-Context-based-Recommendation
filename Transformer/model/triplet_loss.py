@@ -9,7 +9,11 @@ class TripletLoss(nn.Module):
 
     L = max{(d(q, p) - d(q, n) + m), 0}
     """
-    def __init__(self, distance: Optional[str] = 'cosine', margin: Optional[float] = 1) -> NoReturn:
+    def __init__(
+        self, 
+        distance: Optional[str] = 'cosine', 
+        margin: Optional[float] = 1
+    ) -> NoReturn:
         super(TripletLoss, self).__init__()
         """
         Args:
@@ -23,11 +27,15 @@ class TripletLoss(nn.Module):
         else:
             raise NotImplementedError(f"Distance function [{distance}] is not recognize")
 
+        self.margin = margin
 
-    def forward(self, 
-                query: torch.Tensor,
-                positive: torch.Tensor,
-                negative: torch.Tensor) -> torch.Tensor:
+
+    def forward(
+        self, 
+        query: torch.Tensor,
+        positive: torch.Tensor,
+        negative: torch.Tensor
+    ) -> torch.Tensor:
 
         distance_positive = self.distance_f(query, positive)
         distance_negative = self.distance_f(query, negative)
