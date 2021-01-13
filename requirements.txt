@@ -1,0 +1,5 @@
+torch==1.4.0
+numpy==1.19.4
+transformers==3.4.0
+annoy==1.17.0
+tqdm==4.50.2

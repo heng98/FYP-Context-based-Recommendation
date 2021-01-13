@@ -86,8 +86,8 @@ if __name__ == "__main__":
     paper_ids_set = set(paper_ids)
 
     # Get all the positive from dataset
-    for p in paper_ids:
-        network[p]["pos"] = feat.get_pos(papers["train"][p], paper_ids_set)
+    for paper in papers["train"]:
+        network[paper["ids"]]["pos"] = feat.get_pos(paper, paper_ids_set)
 
     # Get all the hard negative from network
     for p in paper_ids:
@@ -109,10 +109,10 @@ if __name__ == "__main__":
         abstracts.append(paper["abstract"])
 
     encoded = feat.get_input(titles, abstracts)
-    paper_ids_set = paper_ids_set.update(paper_ids)
 
-    for p in paper_ids:
-        network[p]["pos"] = feat.get_pos(papers["train"][p], paper_ids_set)
+    for paper in papers["test"]:
+        network[paper["ids"]]["pos"] = feat.get_pos(paper, paper_ids_set)
+    
 
     torch.save(
         {"paper_ids": paper_ids, "encoded": encoded.data, "network": network},

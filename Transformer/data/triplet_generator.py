@@ -1,5 +1,5 @@
 import operator
-from typing import List, Tuple, Dict, Optional, Generator, NoReturn, Iterator
+from typing import List, Tuple, Dict, Optional, Iterator
 
 import math
 import numpy as np
@@ -12,6 +12,7 @@ class TripletGenerator:
     def __init__(
         self,
         paper_ids: List[str],
+        idx_paper_ids: Dict[int, str],
         dataset: Dict[str, Dict[str, List[int]]],
         samples_per_query: int,
         ratio_hard_neg: Optional[float] = 0.5,
@@ -19,19 +20,18 @@ class TripletGenerator:
 
         self.paper_ids = paper_ids
         self.paper_ids_set = set(paper_ids)
+        self.idx_paper_ids = idx_paper_ids
         self.dataset = dataset
         self.samples_per_query = samples_per_query
         self.ratio_hard_neg = ratio_hard_neg
-        self.ids2idx = dict()
 
-        for idx, ids in enumerate(self.paper_ids):
-            self.ids2idx[ids] = idx
 
-    def get_paper_ids_from_idx(self, idx: int) -> str:
-        return self.paper_ids[idx]
+        self.paper_ids_idx = {k: v for v, k in self.idx_paper_ids.items()}
+    # def get_paper_ids_from_idx(self, idx: int) -> str:
+    #     return self.paper_ids[idx]
 
-    def get_idx_from_paper_ids(self, ids: str) -> int:
-        return self.ids2idx[ids]
+    # def get_idx_from_paper_ids(self, ids: str) -> int:
+    #     return self.ids2idx[ids]
 
     def _get_easy_neg(
         self, query_id: str, n_easy_samples: int
@@ -52,7 +52,7 @@ class TripletGenerator:
 
         easy_samples = []
         if self.dataset[query_id]["pos"] and easy_neg_candidates:
-            for i in range(n_easy_samples):
+            for _ in range(n_easy_samples):
                 pos = random.choice(self.dataset[query_id]["pos"])
                 neg = random.choice(easy_neg_candidates)
                 easy_samples.append((query_id, pos, neg))
@@ -105,7 +105,7 @@ class TripletGenerator:
             results = self._get_triplet(query_id)
             if results:
                 for triplet in results:
-                    int_triplet = tuple((self.ids2idx[i] for i in triplet))
+                    int_triplet = tuple((self.paper_ids_idx[i] for i in triplet))
                     # for i in triplet:
                     # print(self.ids2idx[i])
 
