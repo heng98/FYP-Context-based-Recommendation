@@ -1,6 +1,9 @@
 import torch
+import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+
+import transformers
 
 from model.embedding_model import EmbeddingModel
 from model.triplet_loss import TripletLoss
@@ -15,6 +18,25 @@ import logging
 logging.basicConfig(level = logging.INFO)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+# class STLR(torch.optim.lr_scheduler._LRScheduler):
+#     def __init__(self, optimizer, max_mul, ratio, steps_per_cycle, decay=1, last_epoch=-1):
+#         self.max_mul = max_mul - 1
+#         self.turning_point = steps_per_cycle // (ratio + 1)
+#         self.steps_per_cycle = steps_per_cycle
+#         self.decay = decay
+#         super().__init__(optimizer, last_epoch)
+
+#     def get_lr(self):
+#         residual = self.last_epoch % self.steps_per_cycle
+#         multiplier = self.decay ** (self.last_epoch // self.steps_per_cycle)
+#         if residual <= self.turning_point:
+#             multiplier *= self.max_mul * (residual / self.turning_point)
+#         else:
+#             multiplier *= self.max_mul * (
+#                 (self.steps_per_cycle - residual) /
+#                 (self.steps_per_cycle - self.turning_point))
+#         return [lr * (1 + multiplier) for lr in self.base_lrs]
 
 
 def eval_score(predicted_top_k, actual, k=5):
@@ -41,43 +63,71 @@ def eval_score(predicted_top_k, actual, k=5):
 def to_device_dict(d, device):
     return {k: v.to(device) for k, v in d.items()}
 
+class FullModel(nn.Module):
+    def __init__(self, embedding_model, loss_model):
+        super(FullModel, self).__init__()
+        self.embedding_model = embedding_model
+        self.loss_model = loss_model
+    
+    def forward(self, q, p, n):
+        q_e = self.embedding_model(q)
+        p_e = self.embedding_model(p)
+        n_e = self.embedding_model(n)
+
+        loss = self.loss_model(q_e, p_e, n_e)
+
+        return loss
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', type=int, default=5)
     parser.add_argument('--model_name', type=str, default="allenai/scibert_scivocab_cased")
-    parser.add_argument('--lr', type=float, default=0.001)
+    parser.add_argument('--lr', type=float, default=2e-4)
     # parser.add_argument('--dataset_path', type=str, required=True)
     # parser.add_argument('--samples_per_query', type=int, default=5)
 
     config = parser.parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = EmbeddingModel(config).to(device)
-    criterion = TripletLoss().to(device)
+    e_model = EmbeddingModel(config)
+    criterion = TripletLoss()
 
+    model = FullModel(e_model, criterion).to(device)
+    model = nn.DataParallel(model, device_ids=[0, 1, 2, 3])
+    
     triplet_dataset = PaperTripletDataset("./train_file.pth")
     eval_dataset = PaperEvalDataset("./test_file.pth", triplet_dataset.idx_paper_ids)
 
     logger.info(f"{len(triplet_dataset)} triplets is generated")
-    triplet_dataloader = DataLoader(triplet_dataset, batch_size=8, shuffle=True)
+    triplet_dataloader = DataLoader(triplet_dataset, batch_size=4, shuffle=True, num_workers=12)
 
     optimizer = optim.Adam(model.parameters(), lr=config.lr)
+    scheduler = transformers.get_linear_schedule_with_warmup(optimizer, len(triplet_dataloader) // 8, len(triplet_dataloader) * 5 // 8)
 
     for epoch in range(config.epochs):
         logger.info(f"=====Epoch {epoch}=====")
         model.train()
-        for q, p, n in tqdm(triplet_dataloader):
+        
+        for i, (q, p, n) in enumerate(tqdm(triplet_dataloader)):
             q, p, n = to_device_dict(q, device), to_device_dict(p, device), to_device_dict(n, device)
-            optimizer.zero_grad()
-            query_embedding = model(q)
-            positive_embedding = model(p)
-            negative_embedding = model(n)
+            
+            # query_embedding = model(q)
+            # positive_embedding = model(p)
+            # negative_embedding = model(n)
 
-            loss = criterion(query_embedding, positive_embedding, negative_embedding)
+            # loss = criterion(query_embedding, positive_embedding, negative_embedding)
+            loss = model(q, p, n).mean()
+            # print(loss)
             loss.backward()
 
-            optimizer.step()
+            if (i + 1) % 5000 == 0:
+                logger.info(f"LR: {scheduler.get_last_lr()}")
+
+            if (i + 1) % 4 == 0:
+                optimizer.step()
+                optimizer.zero_grad()
+                scheduler.step()
 
         model.eval()
         with torch.no_grad():
