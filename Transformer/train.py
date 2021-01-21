@@ -1,14 +1,15 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 from torch.utils.data.distributed import DistributedSampler
 
 import transformers
 
 from model.embedding_model import EmbeddingModel
 from model.triplet_loss import TripletLoss
-from data.dataset import PaperTripletDataset, PaperEvalDataset
+from data.dataset import PaperDataset
 from candidate_selector.ann_annoy import ANNAnnoy
 from uitils import distributed
 
@@ -22,10 +23,14 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-def train_one_epoch(model, train_dataloader, criterion, optimizer, scheduler):
+def train_one_epoch(
+    model, train_dataloader, criterion, optimizer, scheduler, epoch, writer, config
+):
+    logger.info()
     model.train()
-
-    for i, (q, p, n) in enumerate(tqdm(train_dataloader)):
+    for i, (q, p, n) in enumerate(
+        tqdm(train_dataloader), epoch * len(train_dataloader)       # Need check
+    ):
         q, p, n = (
             to_device_dict(q, device),
             to_device_dict(p, device),
@@ -39,8 +44,13 @@ def train_one_epoch(model, train_dataloader, criterion, optimizer, scheduler):
         loss = criterion(query_embedding, positive_embedding, negative_embedding)
 
         if i % 50 == 0:
-            reduced_loss = distributed.reduce_mean(loss)
-            logger.info(reduced_loss)
+            if config.distributed:
+                loss_recorded = distributed.reduce_mean(loss)
+            else:
+                loss_recorded = loss.clone().detach()
+
+            if writer:
+                writer.add_scalars("train/loss", loss_recorded.item(), i)
 
         loss.backward()
 
@@ -50,11 +60,12 @@ def train_one_epoch(model, train_dataloader, criterion, optimizer, scheduler):
             scheduler.step()
 
 
-def eval(model, eval_dataloader, criterion):
+def eval(model, eval_dataloader, criterion, epoch, writer, config):
     model.eval()
 
+    loss_list = []
     with torch.no_grad():
-        for i, (q, p, n) in enumerate(tqdm(eval_dataloader)):
+        for i, (q, p, n) in enumerate(tqdm(eval_dataloader), epoch):
             q, p, n = (
                 to_device_dict(q, device),
                 to_device_dict(p, device),
@@ -66,9 +77,18 @@ def eval(model, eval_dataloader, criterion):
             negative_embedding = model(n)
 
             loss = criterion(query_embedding, positive_embedding, negative_embedding)
-
+    
             if i % 50 == 0:
-                reduced_loss = distributed.reduce_mean(loss)
+                if config.distributed:
+                    loss_recorded = distributed.reduce_mean(loss)
+                else:
+                    loss_recorded = loss
+                
+                loss_list.append(loss.item())
+
+    epoch_loss = torch.tensor(loss_list, dtype=torch.float).mean()
+    writer.add_scalars("val/loss", epoch_loss, epoch)
+
 
 
 # def idk():
@@ -146,41 +166,76 @@ if __name__ == "__main__":
         "--model_name", type=str, default="allenai/scibert_scivocab_cased"
     )
     parser.add_argument("--lr", type=float, default=2e-4)
+    parser.add_argument("--accumulate_step_size", type=int, default=4)
 
     # parser.add_argument('--local_rank', default=-1, type=int)
     # parser.add_argument('--dataset_path', type=str, required=True)
     # parser.add_argument('--samples_per_query', type=int, default=5)
 
     config = parser.parse_args()
-    distributed.init_distributed(config)
+    distributed.init_distributed_mode(config)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = EmbeddingModel(config).to(device)
     criterion = TripletLoss()
 
-    model = nn.DistributedDataParallel(model, device_ids=[config.gpu])
+    if config.distributed:
+        model = nn.DistributedDataParallel(model, device_ids=[config.gpu])
 
-    train_dataset = PaperTripletDataset("./train_file.pth")
-    train_sampler = DistributedSampler(train_dataset)
-    # eval_dataset = PaperEvalDataset("./test_file.pth", triplet_dataset.idx_paper_ids)
+    train_paper_dataset = PaperDataset("./train_file.pth", "./encoded.pth", config)
+    train_triplet_dataset = train_paper_dataset.get_triplet_dataset(
+        train_paper_dataset.paper_ids_idx_mapping
+    )
 
-    # logger.info(f"{len(triplet_dataset)} triplets is generated")
-    train_dataloader = DataLoader(
-        train_dataset,
+    test_paper_dataset = PaperDataset("./test_file.pth", "./encoded.pth", config)
+    test_triplet_dataset = test_paper_dataset.get_triplet_dataset(
+        {
+            **train_paper_dataset.paper_ids_idx_mapping,
+            **test_paper_dataset.paper_ids_idx_mapping,
+        }
+    )
+    test_paper_pos_dataset = test_paper_dataset.get_paper_pos_dataset(
+        train_paper_dataset.paper_ids_idx_mapping
+    )
+
+    if config.distributed:
+        train_triplet_sampler = DistributedSampler(train_triplet_dataset)
+        test_triplet_sampler = DistributedSampler(test_triplet_dataset)
+    else:
+        # Initialize this instead of using shuffle args in DataLoader
+        train_triplet_sampler = RandomSampler(train_triplet_dataset)
+        test_triplet_sampler = SequentialSampler(test_triplet_dataset)
+
+    train_triplet_dataloader = DataLoader(
+        train_triplet_dataset,
         batch_size=4,
-        shuffle=True,
         num_workers=12,
         pin_memory=True,
-        sampler=train_sampler,
+        sampler=train_triplet_sampler,
+    )
+    test_triplet_dataloader = DataLoader(
+        test_triplet_dataset,
+        batch_size=4,
+        num_workers=12,
+        pin_memory=True,
+        sampler=test_triplet_dataset,
     )
 
     optimizer = optim.Adam(model.parameters(), lr=config.lr)
     scheduler = transformers.get_linear_schedule_with_warmup(
-        optimizer, len(train_dataloader) // 8, len(train_dataloader) * 5 // 8
+        optimizer,
+        len(train_triplet_dataloader) // 8,
+        len(train_triplet_dataloader) * 5 // 8,
     )
-    logger.info(len(train_dataloader))
 
-    for epoch in range(1, epochs + 1):
-        logger.info(f"======{epoch} epochs ======")
-        train_one_epoch(model, train_dataloader, criterion, optimizer, scheduler)
+    if distributed.is_main_process():
+        writer = SummaryWriter()
+    else:
+        writer = None
+
+    for epoch in range(0, config.epochs):
+        train_one_epoch(
+            model, train_triplet_dataloader, criterion, optimizer, scheduler, epoch, writer, config
+        )
+        eval(model, test_triplet_dataloader, criterion, epoch, writer, config)
