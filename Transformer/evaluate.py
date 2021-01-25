@@ -18,27 +18,12 @@ logger.setLevel(logging.INFO)
 def to_device_dict(d, device):
     return {k: v.to(device) for k, v in d.items()}
 
-def eval_score(predicted_top_k, actual, k=5):
-    actual_set = set(actual)
-    sorted_correct = [y in actual_set for y in predicted_top_k[0]]
+def eval_score(predicted, actual, k=20):
+    mrr_score = mrr(predicted, actual, k=k)
+    precision, recall, f1 = precision_recall_f1(predicted, actual, k=k)
+    ndcg_value = ndcg(predicted, actual, k=k)
 
-    try:
-        idx = sorted_correct.index(True)
-        mrr = 1 / (idx + 1)
-    except ValueError:
-        mrr = 0
-
-    num_correct = sum(sorted_correct[:k])
-    precision = num_correct / k
-    recall = num_correct / len(actual)
-
-    if num_correct == 0:
-        f1 = 0
-    else:
-        f1 = 2 * precision * recall / (precision + recall)
-
-    return mrr, precision, recall, f1
-
+    return mrr_score, precision, recall, f1, ndcg_value
 
 def mrr(predicted, actual, k=20):
     actual_set = set(actual)
@@ -117,6 +102,7 @@ if __name__ == "__main__":
         p_list = []
         r_list = []
         f1_list = []
+        ndcg_list = []
 
         logger.info("Evaluating")
         skipped = 0
@@ -130,13 +116,14 @@ if __name__ == "__main__":
 
             # Check if top_k is sorted or not
             top_k = ann.get_k_nearest_neighbour(query_embedding, 50)
-            mrr, precision, recall, f1 = eval_score(top_k, positive)
+            mrr_score, precision, recall, f1, ndcg_value = eval_score(top_k, positive)
 
-            # logger.info(f"MRR: {mrr}, P@5: {precision}, R@5: {recall}, f1@5: {f1}")
+            logger.info(f"MRR: {mrr}, P@5: {precision}, R@5: {recall}, f1@5: {f1}")
             mrr_list.append(mrr)
             p_list.append(precision)
             r_list.append(recall)
             f1_list.append(f1)
+            ndcg_list.append(ndcg_value)
 
         logger.info(f"Skipped: {skipped}")
 
