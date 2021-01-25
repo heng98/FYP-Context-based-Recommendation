@@ -91,72 +91,6 @@ def eval(model, eval_dataloader, criterion, epoch, writer, config):
     if writer:
         writer.add_scalar("val/loss", epoch_loss, epoch)
 
-
-
-# def idk():
-#         model.eval()
-#         with torch.no_grad():
-#             doc_embedding_vectors = torch.empty(len(triplet_dataset.paper_ids), 768)
-#             for i in tqdm(range(len(triplet_dataset.encoded["input_ids"]), 10)):
-#                 q = {k: v[[i]] for k, v in triplet_dataset.encoded.items()}
-#                 q = to_device_dict(q, device)
-#                 query_embedding = model(q)
-#                 doc_embedding_vectors[i] = query_embedding
-
-#             logger.info("Building Annoy Index")
-#             ann = ANNAnnoy.build_graph(doc_embedding_vectors)
-#             mrr_list = []
-#             p_list = []
-#             r_list = []
-#             f1_list = []
-
-#             logger.info("Evaluating")
-#             for query, positive in tqdm(eval_dataset):
-#                 if not positive:
-#                     continue
-
-#                 query = to_device_dict(query, device)
-#                 query_embedding = model(query).cpu().numpy()[0]
-
-#                 # Check if top_k is sorted or not
-#                 top_k = ann.get_k_nearest_neighbour(query_embedding, 10)
-#                 mrr, precision, recall, f1 = eval_score(top_k, positive)
-
-#                 # logger.info(f"MRR: {mrr}, P@5: {precision}, R@5: {recall}, f1@5: {f1}")
-#                 mrr_list.append(mrr)
-#                 p_list.append(precision)
-#                 r_list.append(recall)
-#                 f1_list.append(f1)
-
-#             logger.info("Mean")
-#             logger.info(
-#                 f"MRR: {sum(mrr_list) / len(mrr_list)}, P@5: {sum(p_list) / len(p_list)}, "
-#                 + f"R@5: {sum(r_list) / len(r_list)}, f1@5: {sum(f1_list) / len(f1_list)}"
-#             )
-
-
-def eval_score(predicted_top_k, actual, k=5):
-    actual_set = set(actual)
-    sorted_correct = [y in actual_set for y in predicted_top_k[0]]
-
-    try:
-        idx = sorted_correct.index(True)
-        mrr = 1 / (idx + 1)
-    except ValueError:
-        mrr = 0
-
-    num_correct = sum(sorted_correct[:k])
-    precision = num_correct / k
-    recall = num_correct / len(actual)
-
-    if num_correct == 0:
-        f1 = 0
-    else:
-        f1 = 2 * precision * recall / (precision + recall)
-
-    return mrr, precision, recall, f1
-
-
 def to_device_dict(d, device):
     return {k: v.to(device) for k, v in d.items()}
 
@@ -229,8 +163,6 @@ if __name__ == "__main__":
     )
 
     optimizer = optim.Adam(model.parameters(), lr=config.lr)
-    print(len(train_triplet_dataset))
-    print(len(train_triplet_dataloader))
     scheduler = transformers.get_linear_schedule_with_warmup(
         optimizer,
         len(train_triplet_dataloader),
