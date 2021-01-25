@@ -103,4 +103,4 @@ class TripletGenerator:
             else:
                 skipped += 1
 
-        print(success, skipped)
+        # print(success, skipped)

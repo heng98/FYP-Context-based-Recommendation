@@ -2,7 +2,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from typing import NoReturn, Dict, List, Any, Tuple, Set, Optional
 
-from triplet_generator import TripletGenerator
+from .triplet_generator import TripletGenerator
 
 
 class PaperPosDataset(Dataset):
@@ -76,12 +76,11 @@ class TripletDataset(Dataset):
         pos_idx = self.candidate_paper_ids_idx_mapping[triplet[1]]
         neg_idx = self.candidate_paper_ids_idx_mapping[triplet[2]]
 
-        # query = {k: v[query_idx] for k, v in self.encoded.items()}
-        # pos = {k: v[pos_idx] for k, v in self.encoded.items()}
-        # neg = {k: v[neg_idx] for k, v in self.encoded.items()}
+        query = {k: v[query_idx] for k, v in self.encoded.items()}
+        pos = {k: v[pos_idx] for k, v in self.encoded.items()}
+        neg = {k: v[neg_idx] for k, v in self.encoded.items()}
 
-        # return query, pos, neg
-        return query_idx, pos_idx, neg_idx
+        return query, pos, neg
 
     def __len__(self) -> int:
         return len(self.triplet)
@@ -116,9 +115,8 @@ class PaperDataset:
             self.encoded,
             self.network,
             candidate_paper_ids_idx_mapping,
-            5
-            # self.config.samples_per_query,
-            # self.config.ratio_hard_neg
+            self.config.samples_per_query,
+            self.config.ratio_hard_neg
         )
 
 
