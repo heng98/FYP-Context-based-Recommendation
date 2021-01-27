@@ -19,16 +19,18 @@ def to_device_dict(d, device):
     return {k: v.to(device) for k, v in d.items()}
 
 def eval_score(predicted, actual, k=20):
-    mrr_score = mrr(predicted, actual, k=k)
-    precision, recall, f1 = precision_recall_f1(predicted, actual, k=k)
+    actual_set = set(actual)
+    correct = [y in actual_set for y in predicted]
+
+
+    mrr_score = mrr(correct, k=k)
+    precision, recall, f1 = precision_recall_f1(correct, actual, k=k)
     ndcg_value = ndcg(predicted, actual, k=k)
 
     return mrr_score, precision, recall, f1, ndcg_value
 
 def mrr(predicted, actual, k=20):
-    actual_set = set(actual)
-    sorted_correct = [y in actual_set for y in predicted[0]]
-
+    return 0
     try:
         idx = sorted_correct.index(True)
         mrr = 1 / (idx + 1)
@@ -39,10 +41,7 @@ def mrr(predicted, actual, k=20):
 
 
 def precision_recall_f1(predicted, actual, k=20):
-    actual_set = set(actual)
-    sorted_correct = [y in actual_set for y in predicted[0]]
-
-    num_correct = sum(sorted_correct[:k])
+    num_correct = sum(predicted)
     precision = num_correct / k
     recall = num_correct / len(actual)
 
@@ -125,13 +124,13 @@ if __name__ == "__main__":
             query_embedding = model(query).cpu().numpy()[0]
 
             # Check if top_k is sorted or not
-            # top_k = ann.get_k_nearest_neighbour(query_embedding, 50)
-            top_k = ann.index.get_nns_by_item(i, 50, include_distances=True)
-            # sim = np.dot(doc_embedding_vectors, -query_embedding)
-            # idx = np.argpartition(sim, 50)[:50]
-            # top_k = idx[np.argsort(sim[idx])].tolist()
+            top_k = ann.get_k_nearest_neighbour(query_embedding, 5)
+            candidate = set(top_k[0])
+            for idx in top_k[0]:
+                _, citation_of_top_k = train_paper_dataset[idx]
+                candidate += set(citation_of_top_k)
 
-            mrr_score, precision, recall, f1, ndcg_value = eval_score(top_k, positive)
+            mrr_score, precision, recall, f1, ndcg_value = eval_score(candidate, positive, k=10)
 
             logger.info(f"MRR: {mrr_score}, P@5: {precision}, R@5: {recall}, f1@5: {f1}")
             mrr_list.append(mrr_score)
