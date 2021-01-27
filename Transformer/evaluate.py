@@ -1,5 +1,5 @@
 import torch
-
+import numpy as np
 from sklearn.metrics import ndcg_score
 
 from model.embedding_model import EmbeddingModel
@@ -55,11 +55,12 @@ def precision_recall_f1(predicted, actual, k=20):
 
 
 def ndcg(predicted, actual, k=20):
+    return 0
     actual_set = set(actual)
     sorted_correct = [1 if y in actual_set else 0 for y in predicted[0]]
-
-    score = ndcg_score(actual, sorted_correct)
-
+    print(sorted_correct[:k], predicted[:k])
+    score = ndcg_score(sorted_correct[:k], predicted[0][:k])
+    
     return score
 
 
@@ -72,7 +73,13 @@ if __name__ == "__main__":
     config = parser.parse_args()
 
     model = EmbeddingModel(config)
-    model.load_state_dict(torch.load(config.weight_path))
+    state_dict = torch.load(config.weight_path)["state_dict"]
+    temp_fix_state_dict = {}
+    for k, v in state_dict.items():
+        temp_fix_state_dict[k.replace("module.", "")] = v
+
+
+    model.load_state_dict(temp_fix_state_dict)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
@@ -90,12 +97,14 @@ if __name__ == "__main__":
     model.eval()
     with torch.no_grad():
         doc_embedding_vectors = torch.empty(len(train_paper_pos_dataset), 768)
-        for i, (encoded, _) in train_paper_pos_dataset:
+        for i, (encoded, _) in enumerate(tqdm(train_paper_pos_dataset)):
+            encoded = {k: v.unsqueeze(0) for k, v in encoded.items()}
             encoded = to_device_dict(encoded, device)
     
             query_embedding = model(encoded)
             doc_embedding_vectors[i] = query_embedding
 
+        doc_embedding_vectors = doc_embedding_vectors.cpu().numpy()
         logger.info("Building Annoy Index")
         ann = ANNAnnoy.build_graph(doc_embedding_vectors)
         mrr_list = []
@@ -106,20 +115,26 @@ if __name__ == "__main__":
 
         logger.info("Evaluating")
         skipped = 0
-        for query, positive in tqdm(test_paper_pos_dataset):
+        for i, (query, positive) in enumerate(tqdm(train_paper_pos_dataset)):
             if not positive:
                 skipped += 1
                 continue
 
+            query = {k: v.unsqueeze(0) for k, v in query.items()}
             query = to_device_dict(query, device)
             query_embedding = model(query).cpu().numpy()[0]
 
             # Check if top_k is sorted or not
-            top_k = ann.get_k_nearest_neighbour(query_embedding, 50)
+            # top_k = ann.get_k_nearest_neighbour(query_embedding, 50)
+            top_k = ann.index.get_nns_by_item(i, 50, include_distances=True)
+            # sim = np.dot(doc_embedding_vectors, -query_embedding)
+            # idx = np.argpartition(sim, 50)[:50]
+            # top_k = idx[np.argsort(sim[idx])].tolist()
+
             mrr_score, precision, recall, f1, ndcg_value = eval_score(top_k, positive)
 
-            logger.info(f"MRR: {mrr}, P@5: {precision}, R@5: {recall}, f1@5: {f1}")
-            mrr_list.append(mrr)
+            logger.info(f"MRR: {mrr_score}, P@5: {precision}, R@5: {recall}, f1@5: {f1}")
+            mrr_list.append(mrr_score)
             p_list.append(precision)
             r_list.append(recall)
             f1_list.append(f1)
