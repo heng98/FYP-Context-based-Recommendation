@@ -36,17 +36,22 @@ class FeatureExtractor:
         return data
 
     @staticmethod
-    def get_pos(paper: Dict[str, Any], papers_ids_set: Set[str]) -> Dict[str, Any]:
-        pos = list(set(paper["citations"]).intersection(papers_ids_set))
+    def build_paper_ids_idx_mapping(papers: List[Dict[str, Any]]):
+        mapping = dict()
+        for idx, paper in enumerate(papers):
+            mapping[paper["ids"]] = idx
+
+        return mapping
+
+    @staticmethod
+    def get_pos(paper: Dict[str, Any]) -> Dict[str, Any]:
+        pos = list(set(paper["citations"]))
 
         return pos
 
     @staticmethod
     def get_hard_neg(query_paper: str, network: Dict[str, Dict[str, Any]]) -> List[str]:
-        papers_set = set(network.keys())
-        # Choose the positive that is in papers
-
-        pos = set(network[query_paper]["pos"]).intersection(papers_set)
+        pos = set(network[query_paper]["pos"])
         hard_neg = set()
         # Get postive of positive of query paper
 
@@ -58,8 +63,7 @@ class FeatureExtractor:
                 logger.info(f"Abstract is not in paper with ids {p}")
 
         # Remove positive paper inside hard negative
-        # Choose hard negative only inside papers
-        hard_neg = (hard_neg - pos).intersection(papers_set)
+        hard_neg = hard_neg - pos
 
         return list(hard_neg)
 
@@ -69,52 +73,63 @@ if __name__ == "__main__":
     path = "./processed_aan_data/dataset.json"
     papers = json.load(open(path, "r"))
 
-    # Training Dataset
-    paper_ids = []
+    all_papers = papers["train"] + papers["test"]
     titles = []
     abstracts = []
-    network = defaultdict(dict)
-
-    # sequence of paper is labelled here
-    for paper in papers["train"]:
-        paper_ids.append(paper["ids"])
+    for paper in all_papers:
         titles.append(paper["title"])
         abstracts.append(paper["abstract"])
 
-    # Batch encode all the titles and abstracts
     encoded = feat.get_input(titles, abstracts)
-    paper_ids_set = set(paper_ids)
+    paper_ids_idx_mapping = feat.build_paper_ids_idx_mapping(all_papers)
+
+    torch.save(
+        {"encoded": encoded.data, "paper_ids_idx_mapping": paper_ids_idx_mapping},
+        "encoded.pth",
+    )
+
+    # Training Dataset
+    train_network = defaultdict(dict)
+
+    # Mapping of ids -> idx
+    train_paper_ids_idx_mapping = {
+        paper["ids"]: paper_ids_idx_mapping[paper["ids"]] for paper in papers["train"]
+    }
 
     # Get all the positive from dataset
     for paper in papers["train"]:
-        network[paper["ids"]]["pos"] = feat.get_pos(paper, paper_ids_set)
+        train_network[paper["ids"]]["pos"] = feat.get_pos(paper)
 
     # Get all the hard negative from network
-    for p in paper_ids:
-        network[p]["hard"] = feat.get_hard_neg(p, network)
+    for p in train_network.keys():
+        train_network[p]["hard"] = feat.get_hard_neg(p, train_network)
 
     torch.save(
-        {"paper_ids": paper_ids, "encoded": encoded.data, "network": network},
+        {
+            "paper_ids_idx_mapping": train_paper_ids_idx_mapping,
+            "network": train_network,
+        },
         f"train_file.pth",
     )
 
     # Test Dataset
-    paper_ids = []
-    titles = []
-    abstracts = []
-    network = defaultdict(dict)
-    for paper in papers["test"]:
-        paper_ids.append(paper["ids"])
-        titles.append(paper["title"])
-        abstracts.append(paper["abstract"])
+    test_network = defaultdict(dict)
 
-    encoded = feat.get_input(titles, abstracts)
+    # Mapping of ids -> idx
+    test_paper_ids_idx_mapping = {
+        paper["ids"]: paper_ids_idx_mapping[paper["ids"]] for paper in papers["test"]
+    }
 
     for paper in papers["test"]:
-        network[paper["ids"]]["pos"] = feat.get_pos(paper, paper_ids_set)
-    
+        test_network[paper["ids"]]["pos"] = feat.get_pos(paper)
+
+    for p in test_network.keys():
+        test_network[p]["hard"] = feat.get_hard_neg(p, test_network)
 
     torch.save(
-        {"paper_ids": paper_ids, "encoded": encoded.data, "network": network},
+        {
+            "paper_ids_idx_mapping": test_paper_ids_idx_mapping,
+            "network": test_network,
+        },
         f"test_file.pth",
     )
