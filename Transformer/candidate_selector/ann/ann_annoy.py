@@ -22,7 +22,7 @@ class ANNAnnoy:
 
     def get_k_nearest_neighbour(self, query_vector, top_k):
         top_k_result = self.index.get_nns_by_vector(
-            query_vector, top_k, include_distances=True
+            query_vector, top_k, include_distances=False
         )
 
         return top_k_result

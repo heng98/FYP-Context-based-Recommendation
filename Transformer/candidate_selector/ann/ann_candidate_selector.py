@@ -11,7 +11,7 @@ class ANNCandidateSelector:
 
         self.train_paper_dataset = train_paper_dataset
 
-    def get_candidate(self, query_embedding, top_k):
+    def get_candidate(self, query_embedding):
         candidate = self.ann.get_k_nearest_neighbour(
             query_embedding, self.neighbour_candidate
         )
