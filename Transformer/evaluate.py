@@ -4,7 +4,8 @@ from sklearn.metrics import ndcg_score
 
 from model.embedding_model import EmbeddingModel
 from data.dataset import PaperDataset
-from candidate_selector.ann_annoy import ANNAnnoy
+from candidate_selector.ann.ann_annoy import ANNAnnoy
+from candidate_selector.ann.ann_candidate_selector import ANNCandidateSelector
 
 import argparse
 from tqdm import tqdm
@@ -20,8 +21,7 @@ def to_device_dict(d, device):
 
 def eval_score(predicted, actual, k=20):
     actual_set = set(actual)
-    correct = [y in actual_set for y in predicted]
-
+    correct = [y[0] in actual_set for y in predicted]
 
     mrr_score = mrr(correct, k=k)
     precision, recall, f1 = precision_recall_f1(correct, actual, k=k)
@@ -29,19 +29,17 @@ def eval_score(predicted, actual, k=20):
 
     return mrr_score, precision, recall, f1, ndcg_value
 
-def mrr(predicted, actual, k=20):
-    return 0
+def mrr(correct, k=20):
     try:
-        idx = sorted_correct.index(True)
+        idx = correct.index(True)
         mrr = 1 / (idx + 1)
     except ValueError:
         mrr = 0
 
     return mrr
 
-
 def precision_recall_f1(predicted, actual, k=20):
-    num_correct = sum(predicted)
+    num_correct = sum(predicted[:k])
     precision = num_correct / k
     recall = num_correct / len(actual)
 
@@ -106,6 +104,9 @@ if __name__ == "__main__":
         doc_embedding_vectors = doc_embedding_vectors.cpu().numpy()
         logger.info("Building Annoy Index")
         ann = ANNAnnoy.build_graph(doc_embedding_vectors)
+        ann_candidate_selector = ANNCandidateSelector(
+            ann, 5, train_paper_dataset
+        )
         mrr_list = []
         p_list = []
         r_list = []
@@ -124,13 +125,9 @@ if __name__ == "__main__":
             query_embedding = model(query).cpu().numpy()[0]
 
             # Check if top_k is sorted or not
-            top_k = ann.get_k_nearest_neighbour(query_embedding, 5)
-            candidate = set(top_k[0])
-            for idx in top_k[0]:
-                _, citation_of_top_k = train_paper_dataset[idx]
-                candidate += set(citation_of_top_k)
+            candidates = ann_candidate_selector.get_candidate(query_embedding)
 
-            mrr_score, precision, recall, f1, ndcg_value = eval_score(candidate, positive, k=10)
+            mrr_score, precision, recall, f1, ndcg_value = eval_score(candidates, positive, k=10)
 
             logger.info(f"MRR: {mrr_score}, P@5: {precision}, R@5: {recall}, f1@5: {f1}")
             mrr_list.append(mrr_score)
