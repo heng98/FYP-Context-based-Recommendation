@@ -105,7 +105,7 @@ if __name__ == "__main__":
         logger.info("Building Annoy Index")
         ann = ANNAnnoy.build_graph(doc_embedding_vectors)
         ann_candidate_selector = ANNCandidateSelector(
-            ann, 10, train_paper_pos_dataset
+            ann, 5, train_paper_pos_dataset
         )
         mrr_list = []
         p_list = []
@@ -127,7 +127,7 @@ if __name__ == "__main__":
             # Check if top_k is sorted or not
             candidates = ann_candidate_selector.get_candidate(query_embedding)
 
-            mrr_score, precision, recall, f1, ndcg_value = eval_score(candidates, positive, k=100)
+            mrr_score, precision, recall, f1, ndcg_value = eval_score(candidates, positive, k=20)
 
             logger.info(f"MRR: {mrr_score}, P@5: {precision}, R@5: {recall}, f1@5: {f1}")
             mrr_list.append(mrr_score)

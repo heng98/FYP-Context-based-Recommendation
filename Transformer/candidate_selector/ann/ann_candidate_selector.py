@@ -38,5 +38,6 @@ class ANNCandidateSelector:
             np.linalg.norm(candidate_vector, 2, axis=1)
             * np.linalg.norm(query_embedding, 2)
         )
+        # sim = np.linalg.norm(candidate_vector - query_embedding, 2, axis=1)
 
         return sim.tolist()

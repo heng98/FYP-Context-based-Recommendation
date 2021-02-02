@@ -6,3 +6,4 @@ __pycache__/
 processed_aan_data
 **.pth
 .vscode
+runs
