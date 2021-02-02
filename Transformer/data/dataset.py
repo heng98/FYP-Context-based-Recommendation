@@ -23,8 +23,9 @@ class PaperPosDataset(Dataset):
         self.paper_ids_list = list(self.paper_ids_idx_mapping.keys())
 
     def __getitem__(self, index: int):
-        encoded = {k: v[index] for k, v in self.encoded.items()}
         paper_ids = self.paper_ids_list[index]
+        converted_idx = self.paper_ids_idx_mapping[paper_ids]
+        encoded = {k: v[converted_idx] for k, v in self.encoded.items()}
         positive_candidates = set(self.network[paper_ids]["pos"]) & set(
             self.candidate_paper_ids_idx_mapping.keys()
         )

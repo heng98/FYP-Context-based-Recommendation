@@ -10,7 +10,6 @@ import transformers
 from model.embedding_model import EmbeddingModel
 from model.triplet_loss import TripletLoss
 from data.dataset import PaperDataset
-from candidate_selector.ann_annoy import ANNAnnoy
 from utils import distributed
 
 from tqdm import tqdm
@@ -184,4 +183,4 @@ if __name__ == "__main__":
 
 
         if distributed.is_main_process():
-            torch.save({'state_dict': model.state_dict()}, f'weights_{epoch}.pth')
+            torch.save({'state_dict': model.module.state_dict()}, f'weights_{epoch}.pth')
