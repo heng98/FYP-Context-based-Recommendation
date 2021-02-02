@@ -1,0 +1,7 @@
+curl 'https://storage.googleapis.com/kaggle-data-sets/90479/209555/bundle/archive.zip?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=gcp-kaggle-com%40kaggle-161607.iam.gserviceaccount.com%2F20210202%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20210202T155945Z&X-Goog-Expires=259199&X-Goog-SignedHeaders=host&X-Goog-Signature=7cac6c13b50b52f4f47b9514ffcdfc24e294d3a55db8adaec9782a62a14df65a2ba505aca91b1f67e74bf1359e2d17ac78074f0e567d185984c9be865526477a7e621aa68f0a7d875baf44d946445553df9b69050c222baa65ece482ca91f14b7341a8863d5a4cb6596559ef76714fab31820bf2b5309bbd0c8c3513dda7a1fc7c6cb31af00bedcc3817121883979249b851f6410ecf3561ffaeb59adbd5ac82adeaef1f9f8b5cc0b300b435d402413249dd8aa1a4d103ac774a58f382844df3c93cf7e064729af2bb5e15483a126f3b7dc61e58e1479e1f51de9035755ced86cecde98da7878132008dd9b7ac7c706261cc3078c710d783344e4045ef33f2d7' -o Dataset/dblp.zip
+
+cd Dataset
+unzip dblp.zip -d dblp
+cd .. 
+
+python data/process_ann_data.py
