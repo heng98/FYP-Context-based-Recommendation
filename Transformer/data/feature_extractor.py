@@ -70,66 +70,88 @@ class FeatureExtractor:
 
 if __name__ == "__main__":
     feat = FeatureExtractor("allenai/scibert_scivocab_cased")
-    path = "./processed_aan_data/dataset.json"
+    path = "./dblp_dataset.json"
     papers = json.load(open(path, "r"))
 
     all_papers = papers["train"] + papers["test"]
     titles = []
     abstracts = []
+
     for paper in all_papers:
         titles.append(paper["title"])
         abstracts.append(paper["abstract"])
 
-    encoded = feat.get_input(titles, abstracts)
-    paper_ids_idx_mapping = feat.build_paper_ids_idx_mapping(all_papers)
+    a = torch.load("dblp_encoded.pth")
+    print(a["encoded"]["input_ids"].shape)
+    print(len(a["paper_ids_idx_mapping"]))
+    
+    encoded = feat.get_input(titles[-2:], abstracts[-2:])
+    encoding = {}
+    for k in encoded:
+        encoding[k] = torch.cat([a["encoded"][k], encoded[k]])
+        print(encoding[k].shape)
 
     torch.save(
-        {"encoded": encoded.data, "paper_ids_idx_mapping": paper_ids_idx_mapping},
-        "encoded.pth",
+        {"encoded": encoding, "paper_ids_idx_mapping": a["paper_ids_idx_mapping"]},
+        f"dblp_encoded_hi.pth",
     )
 
-    # Training Dataset
-    train_network = defaultdict(dict)
 
-    # Mapping of ids -> idx
-    train_paper_ids_idx_mapping = {
-        paper["ids"]: paper_ids_idx_mapping[paper["ids"]] for paper in papers["train"]
-    }
+    # print(len(all_papers))
+    # batch_size = len(all_papers) // 5
+    # for i in range(5):
+    #     encoded = feat.get_input(titles[i * batch_size:(i + 1) * batch_size], abstracts[i * batch_size:(i + 1) * batch_size])
+    #     paper_ids_idx_mapping = feat.build_paper_ids_idx_mapping(all_papers)
 
-    # Get all the positive from dataset
-    for paper in papers["train"]:
-        train_network[paper["ids"]]["pos"] = feat.get_pos(paper)
+    #     torch.save(
+    #         {"encoded": encoded.data, "paper_ids_idx_mapping": paper_ids_idx_mapping},
+    #         f"dblp_encoded_{i}.pth",
+    #     )
 
-    # Get all the hard negative from network
-    for p in train_network.keys():
-        train_network[p]["hard"] = feat.get_hard_neg(p, train_network)
+    # del encoded
 
-    torch.save(
-        {
-            "paper_ids_idx_mapping": train_paper_ids_idx_mapping,
-            "network": train_network,
-        },
-        f"train_file.pth",
-    )
+    # # Training Dataset
+    # train_network = defaultdict(dict)
 
-    # Test Dataset
-    test_network = defaultdict(dict)
+    # # Mapping of ids -> idx
+    # train_paper_ids_idx_mapping = {
+    #     paper["ids"]: paper_ids_idx_mapping[paper["ids"]] for paper in papers["train"]
+    # }
 
-    # Mapping of ids -> idx
-    test_paper_ids_idx_mapping = {
-        paper["ids"]: paper_ids_idx_mapping[paper["ids"]] for paper in papers["test"]
-    }
+    # # Get all the positive from dataset
+    # for paper in papers["train"]:
+    #     train_network[paper["ids"]]["pos"] = feat.get_pos(paper)
 
-    for paper in papers["test"]:
-        test_network[paper["ids"]]["pos"] = feat.get_pos(paper)
+    # # Get all the hard negative from network
+    # for p in train_network.keys():
+    #     train_network[p]["hard"] = feat.get_hard_neg(p, train_network)
 
-    for p in test_network.keys():
-        test_network[p]["hard"] = feat.get_hard_neg(p, test_network)
+    # torch.save(
+    #     {
+    #         "paper_ids_idx_mapping": train_paper_ids_idx_mapping,
+    #         "network": train_network,
+    #     },
+    #     f"dblp_train_file.pth",
+    # )
 
-    torch.save(
-        {
-            "paper_ids_idx_mapping": test_paper_ids_idx_mapping,
-            "network": test_network,
-        },
-        f"test_file.pth",
-    )
+    # # Test Dataset
+    # test_network = defaultdict(dict)
+
+    # # Mapping of ids -> idx
+    # test_paper_ids_idx_mapping = {
+    #     paper["ids"]: paper_ids_idx_mapping[paper["ids"]] for paper in papers["test"]
+    # }
+
+    # for paper in papers["test"]:
+    #     test_network[paper["ids"]]["pos"] = feat.get_pos(paper)
+
+    # for p in test_network.keys():
+    #     test_network[p]["hard"] = feat.get_hard_neg(p, test_network)
+
+    # torch.save(
+    #     {
+    #         "paper_ids_idx_mapping": test_paper_ids_idx_mapping,
+    #         "network": test_network,
+    #     },
+    #     f"dblp_test_file.pth",
+    # )

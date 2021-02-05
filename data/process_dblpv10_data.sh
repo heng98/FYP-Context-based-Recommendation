@@ -4,4 +4,4 @@ cd Dataset
 unzip dblp.zip -d dblp
 cd .. 
 
-python data/process_ann_data.py
+python data/process_dblpv10_data.py

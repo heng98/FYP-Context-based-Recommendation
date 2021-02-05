@@ -70,15 +70,15 @@ if __name__ == "__main__":
     config = parser.parse_args()
 
     model = EmbeddingModel(config)
-    state_dict = torch.load(config.weight_path)["state_dict"]
+    state_dict = torch.load(config.weight_path, map_location="cuda:1")["state_dict"]
     temp_fix_state_dict = {}
     for k, v in state_dict.items():
         temp_fix_state_dict[k.replace("module.", "")] = v
 
 
-    model.load_state_dict(temp_fix_state_dict)
+    model.load_state_dict(temp_fix_state_dict, strict=False)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
     
     train_paper_dataset = PaperDataset("./train_file.pth", "./encoded.pth", config)
@@ -116,7 +116,7 @@ if __name__ == "__main__":
         logger.info("Evaluating")
         skipped = 0
         for i, (query, positive) in enumerate(tqdm(test_paper_pos_dataset)):
-            if not positive:
+            if len(positive) < 3:
                 skipped += 1
                 continue
 
@@ -127,7 +127,7 @@ if __name__ == "__main__":
             # Check if top_k is sorted or not
             candidates = ann_candidate_selector.get_candidate(query_embedding)
 
-            mrr_score, precision, recall, f1, ndcg_value = eval_score(candidates, positive, k=20)
+            mrr_score, precision, recall, f1, ndcg_value = eval_score(candidates, positive, k=10)
 
             logger.info(f"MRR: {mrr_score}, P@5: {precision}, R@5: {recall}, f1@5: {f1}")
             mrr_list.append(mrr_score)

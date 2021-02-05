@@ -1,5 +1,5 @@
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, IterableDataset
 from typing import NoReturn, Dict, List, Any, Tuple, Set, Optional
 
 from .triplet_generator import TripletGenerator
@@ -87,6 +87,45 @@ class TripletDataset(Dataset):
         return len(self.triplet)
 
 
+class TripletIterableDataset(IterableDataset):
+    def __init__(
+        self,
+        query_paper_ids_idx_mapping: Dict[str, int],
+        encoded: Dict[str, torch.Tensor],
+        network: Dict[str, List[str]],
+        candidate_paper_ids_idx_mapping: Dict[str, int],
+        samples_per_query: int,
+        ratio_hard_neg: Optional[float] = 0.5,
+    ):
+        super(TripletIterableDataset, self).__init__()
+
+        self.query_paper_ids_idx_mapping = query_paper_ids_idx_mapping
+        self.encoded = encoded
+        self.network = network
+        self.candidate_paper_ids_idx_mapping = candidate_paper_ids_idx_mapping
+
+        self.paper_ids_list = list(self.query_paper_ids_idx_mapping.keys())
+
+        self.triplet_generator = TripletGenerator(
+            self.paper_ids_list,
+            set(candidate_paper_ids_idx_mapping.keys()),
+            self.network,
+            samples_per_query,
+            ratio_hard_neg=ratio_hard_neg,
+        )
+
+    def __iter__(self):
+        for triplet in self.triplet_generator.generate_triplets():
+            query_idx = self.query_paper_ids_idx_mapping[triplet[0]]
+            pos_idx = self.candidate_paper_ids_idx_mapping[triplet[1]]
+            neg_idx = self.candidate_paper_ids_idx_mapping[triplet[2]]
+
+            query = {k: v[query_idx] for k, v in self.encoded.items()}
+            pos = {k: v[pos_idx] for k, v in self.encoded.items()}
+            neg = {k: v[neg_idx] for k, v in self.encoded.items()}
+
+            yield query, pos, neg
+
 class PaperDataset:
     def __init__(self, data_path: str, encoded_path: str, config):
         data_dict = torch.load(data_path)
@@ -111,7 +150,7 @@ class PaperDataset:
         )
 
     def get_triplet_dataset(self, candidate_paper_ids_idx_mapping):
-        return TripletDataset(
+        return TripletIterableDataset(
             self.paper_ids_idx_mapping,
             self.encoded,
             self.network,

@@ -122,12 +122,12 @@ if __name__ == "__main__":
         model = nn.parallel.DistributedDataParallel(model, device_ids=[config.gpu])
         config.batch_size //= config.world_size
 
-    train_paper_dataset = PaperDataset("./train_file.pth", "./encoded.pth", config)
+    train_paper_dataset = PaperDataset("./dblp_train_file.pth", "./dblp_encoded_hi.pth", config)
     train_triplet_dataset = train_paper_dataset.get_triplet_dataset(
         train_paper_dataset.paper_ids_idx_mapping
     )
 
-    test_paper_dataset = PaperDataset("./test_file.pth", "./encoded.pth", config)
+    test_paper_dataset = PaperDataset("./dblp_test_file.pth", "./dblp_encoded_hi.pth", config)
     test_triplet_dataset = test_paper_dataset.get_triplet_dataset(
         {
             **train_paper_dataset.paper_ids_idx_mapping,
@@ -139,7 +139,7 @@ if __name__ == "__main__":
     )
 
     if config.distributed:
-        train_triplet_sampler = DistributedSampler(train_triplet_dataset)
+        train_triplet_sampler = DistributedSampler(train_triplet_dataset, shuffle=False)
         test_triplet_sampler = DistributedSampler(test_triplet_dataset, shuffle=False)
     else:
         # Initialize this instead of using shuffle args in DataLoader
