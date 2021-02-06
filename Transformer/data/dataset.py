@@ -37,81 +37,77 @@ class PaperPosDataset(Dataset):
         return len(self.paper_ids_list)
 
 
-class TripletDataset(Dataset):
-    def __init__(
-        self,
-        query_paper_ids_idx_mapping: Dict[str, int],
-        encoded: Dict[str, torch.Tensor],
-        network: Dict[str, List[str]],
-        candidate_paper_ids_idx_mapping: Dict[str, int],
-        samples_per_query: int,
-        ratio_hard_neg: Optional[float] = 0.5,
-    ):
-        super(TripletDataset, self).__init__()
+# class TripletDataset(Dataset):
+#     def __init__(
+#         self,
+#         query_paper_ids_idx_mapping: Dict[str, int],
+#         encoded: Dict[str, torch.Tensor],
+#         network: Dict[str, List[str]],
+#         candidate_paper_ids_idx_mapping: Dict[str, int],
+#         samples_per_query: int,
+#         ratio_hard_neg: Optional[float] = 0.5,
+#     ):
+#         super(TripletDataset, self).__init__()
 
-        self.query_paper_ids_idx_mapping = query_paper_ids_idx_mapping
-        self.encoded = encoded
-        self.network = network
-        self.candidate_paper_ids_idx_mapping = candidate_paper_ids_idx_mapping
+#         self.query_paper_ids_idx_mapping = query_paper_ids_idx_mapping
+#         self.encoded = encoded
+#         self.network = network
+#         self.candidate_paper_ids_idx_mapping = candidate_paper_ids_idx_mapping
 
-        self.paper_ids_list = list(self.query_paper_ids_idx_mapping.keys())
+#         self.paper_ids_list = list(self.query_paper_ids_idx_mapping.keys())
 
-        self.triplet_generator = TripletGenerator(
-            self.paper_ids_list,
-            set(candidate_paper_ids_idx_mapping.keys()),
-            self.network,
-            samples_per_query,
-            ratio_hard_neg=ratio_hard_neg,
-        )
+#         self.triplet_generator = TripletGenerator(
+#             self.paper_ids_list,
+#             set(candidate_paper_ids_idx_mapping.keys()),
+#             self.network,
+#             samples_per_query,
+#             ratio_hard_neg=ratio_hard_neg,
+#         )
 
-        self.triplet = []
-        for triplet in self.triplet_generator.generate_triplets():
-            self.triplet.append(triplet)
+#         self.triplet = []
+#         for triplet in self.triplet_generator.generate_triplets():
+#             self.triplet.append(triplet)
 
-        self.triplet = list(set(self.triplet))
+#         self.triplet = list(set(self.triplet))
 
-    def __getitem__(self, index: int):
-        triplet = self.triplet[index]
+#     def __getitem__(self, index: int):
+#         triplet = self.triplet[index]
 
-        query_idx = self.query_paper_ids_idx_mapping[triplet[0]]
-        pos_idx = self.candidate_paper_ids_idx_mapping[triplet[1]]
-        neg_idx = self.candidate_paper_ids_idx_mapping[triplet[2]]
+#         query_idx = self.query_paper_ids_idx_mapping[triplet[0]]
+#         pos_idx = self.candidate_paper_ids_idx_mapping[triplet[1]]
+#         neg_idx = self.candidate_paper_ids_idx_mapping[triplet[2]]
 
-        query = {k: v[query_idx] for k, v in self.encoded.items()}
-        pos = {k: v[pos_idx] for k, v in self.encoded.items()}
-        neg = {k: v[neg_idx] for k, v in self.encoded.items()}
+#         query = {k: v[query_idx] for k, v in self.encoded.items()}
+#         pos = {k: v[pos_idx] for k, v in self.encoded.items()}
+#         neg = {k: v[neg_idx] for k, v in self.encoded.items()}
 
-        return query, pos, neg
+#         return query, pos, neg
 
-    def __len__(self) -> int:
-        return len(self.triplet)
+#     def __len__(self) -> int:
+#         return len(self.triplet)
 
 
 class TripletIterableDataset(IterableDataset):
     def __init__(
         self,
+        dataset: List[Dict[str, Any]],
         query_paper_ids_idx_mapping: Dict[str, int],
-        encoded: Dict[str, torch.Tensor],
-        network: Dict[str, List[str]],
         candidate_paper_ids_idx_mapping: Dict[str, int],
         samples_per_query: int,
         ratio_hard_neg: Optional[float] = 0.5,
     ):
         super(TripletIterableDataset, self).__init__()
 
+        self.dataset = dataset
         self.query_paper_ids_idx_mapping = query_paper_ids_idx_mapping
-        self.encoded = encoded
-        self.network = network
         self.candidate_paper_ids_idx_mapping = candidate_paper_ids_idx_mapping
 
-        self.paper_ids_list = list(self.query_paper_ids_idx_mapping.keys())
-
         self.triplet_generator = TripletGenerator(
-            self.paper_ids_list,
-            set(candidate_paper_ids_idx_mapping.keys()),
-            self.network,
+            list(self.query_paper_ids_idx_mapping.values()),
+            set(self.query_paper_ids_idx_mapping),
+            dataset,
             samples_per_query,
-            ratio_hard_neg=ratio_hard_neg,
+            ratio_hard_neg,
         )
 
     def __iter__(self):
@@ -120,73 +116,69 @@ class TripletIterableDataset(IterableDataset):
             pos_idx = self.candidate_paper_ids_idx_mapping[triplet[1]]
             neg_idx = self.candidate_paper_ids_idx_mapping[triplet[2]]
 
-            query = {k: v[query_idx] for k, v in self.encoded.items()}
-            pos = {k: v[pos_idx] for k, v in self.encoded.items()}
-            neg = {k: v[neg_idx] for k, v in self.encoded.items()}
+            yield self.dataset[query_idx], self.dataset[pos_idx], self.dataset[neg_idx]
 
-            yield query, pos, neg
 
-class PaperDataset:
-    def __init__(self, data_path: str, encoded_path: str, config):
-        data_dict = torch.load(data_path)
+class TripletCollator:
+    def __init__(self, tokenizer):
+        self.tokenizer = tokenizer
 
-        self.paper_ids_idx_mapping = data_dict["paper_ids_idx_mapping"]
-        self.network = data_dict["network"]
+    def __call__(self, batch):
+        query_title = [data[0]["title"] for data in batch]
+        query_abstract = [data[0]["abstract"] for data in batch]
 
-        self.encoded = torch.load(encoded_path)["encoded"]
-        self.config = config
+        pos_title = [data[1]["title"] for data in batch[1]]
+        pos_abstract = [data[1]["abstract"] for data in batch]
 
-        assert all(
-            tensor.size(0) == self.encoded["input_ids"].size(0)
-            for tensor in self.encoded.values()
-        )
+        neg_title = [data[2]["title"] for data in batch[2]]
+        neg_abstract = [data[2]["abstract"] for data in batch]
 
-    def get_paper_pos_dataset(self, candidate_paper_ids_idx_mapping):
-        return PaperPosDataset(
-            self.paper_ids_idx_mapping,
-            self.encoded,
-            self.network,
-            candidate_paper_ids_idx_mapping,
-        )
+        query_encoded = self._encode(query_title, query_abstract)
+        pos_encoded = self._encode(pos_title, pos_abstract)
+        neg_encoded = self._encode(neg_title, neg_abstract)
 
-    def get_triplet_dataset(self, candidate_paper_ids_idx_mapping):
-        return TripletIterableDataset(
-            self.paper_ids_idx_mapping,
-            self.encoded,
-            self.network,
-            candidate_paper_ids_idx_mapping,
-            self.config.samples_per_query,
-            self.config.ratio_hard_neg
+        return query_encoded.data, pos_encoded.data, neg_encoded.data
+
+    def _encode(self, title: List[str], abstract: List[str]):
+        return self.tokenizer(
+            title,
+            abstract,
+            padding="max_length",
+            max_length=512,
+            truncation=True,
+            return_tensors="pt",
         )
 
 
-if __name__ == "__main__":
-    train_dataset = PaperDataset("./train_file.pth", "./encoded.pth", None)
-    test_dataset = PaperDataset("./test_file.pth", "./encoded.pth", None)
+# class PaperDataset:
+#     def __init__(self, data_path: str, encoded_path: str, config):
+#         data_dict = torch.load(data_path)
 
-    train_candidate_paper_ids_idx_mapping = train_dataset.paper_ids_idx_mapping
-    test_candidate_paper_ids_idx_mapping = {
-        **train_dataset.paper_ids_idx_mapping,
-        **test_dataset.paper_ids_idx_mapping,
-    }
+#         self.paper_ids_idx_mapping = data_dict["paper_ids_idx_mapping"]
+#         self.network = data_dict["network"]
 
-    # train_triplet_dataset = train_dataset.get_triplet_dataset(
-    #     train_candidate_paper_ids_idx_mapping
-    # )
-    # test_triplet_dataset = test_dataset.get_triplet_dataset(
-    #     test_candidate_paper_ids_idx_mapping
-    # )
+#         self.encoded = torch.load(encoded_path)["encoded"]
+#         self.config = config
 
-    test_paper_pos_dataset = test_dataset.get_paper_pos_dataset(
-        train_candidate_paper_ids_idx_mapping
-    )
+#         assert all(
+#             tensor.size(0) == self.encoded["input_ids"].size(0)
+#             for tensor in self.encoded.values()
+#         )
 
+#     def get_paper_pos_dataset(self, candidate_paper_ids_idx_mapping):
+#         return PaperPosDataset(
+#             self.paper_ids_idx_mapping,
+#             self.encoded,
+#             self.network,
+#             candidate_paper_ids_idx_mapping,
+#         )
 
-    # print(test_triplet_dataset.triplet)
-    # print(len(train_triplet_dataset), len(test_triplet_dataset))
-
-    # for data in test_triplet_dataset:
-    #     print(data)
-
-    # for data in test_paper_pos_dataset:
-    #     print(data[1])
+#     def get_triplet_dataset(self, candidate_paper_ids_idx_mapping):
+#         return TripletIterableDataset(
+#             self.paper_ids_idx_mapping,
+#             self.encoded,
+#             self.network,
+#             candidate_paper_ids_idx_mapping,
+#             self.config.samples_per_query,
+#             self.config.ratio_hard_neg
+#         )

@@ -1,40 +1,13 @@
-import torch
-from transformers import AutoTokenizer
-
-from typing import NoReturn, List, Union, Dict, Any, Set
+import json
+from typing import List, Dict, Any
 import json
 import logging
-from collections import defaultdict
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
-# logger.setLevel(logging.INFO)
-# console_handler = logging.StreamHandler()
-# console_handler.setLevel(logging.INFO)
-# logger.addHandler(console_handler)
 
 
 class FeatureExtractor:
-    def __init__(self, pretrained_path: str):
-        self.tokenizer = AutoTokenizer.from_pretrained(pretrained_path, use_fast=True)
-
-    def get_input(
-        self, title: Union[str, List[str]], abstract: Union[str, List[str]]
-    ) -> Dict[str, torch.Tensor]:
-        """Tokenization for all titles and abstracts
-
-        Args:
-        """
-        data = self.tokenizer(
-            title,
-            abstract,
-            padding="max_length",
-            max_length=512,
-            truncation=True,
-            return_tensors="pt",
-        )
-        return data
-
     @staticmethod
     def build_paper_ids_idx_mapping(papers: List[Dict[str, Any]]):
         mapping = dict()
@@ -50,108 +23,53 @@ class FeatureExtractor:
         return pos
 
     @staticmethod
-    def get_hard_neg(query_paper: str, network: Dict[str, Dict[str, Any]]) -> List[str]:
-        pos = set(network[query_paper]["pos"])
+    def get_hard_neg(
+        query_paper_idx: int,
+        paper_ids_idx_mapping: Dict[str, int],
+        all_papers: List[Dict[str, Any]],
+    ) -> List[str]:
+        query_paper = all_papers[query_paper_idx]
+        pos = set(query_paper["citations"])
         hard_neg = set()
+
         # Get postive of positive of query paper
-
         for p in pos:
-            if p in network:
-                hard_neg.update(network[p]["pos"])
-
+            if p in paper_ids_idx_mapping:
+                paper_idx = paper_ids_idx_mapping[p]
+                hard_neg.update(all_papers[paper_idx]["citations"])
             else:
                 logger.info(f"Abstract is not in paper with ids {p}")
 
         # Remove positive paper inside hard negative
         hard_neg = hard_neg - pos
-
         return list(hard_neg)
 
 
 if __name__ == "__main__":
-    feat = FeatureExtractor("allenai/scibert_scivocab_cased")
+    feat = FeatureExtractor()
     path = "./dblp_dataset.json"
     papers = json.load(open(path, "r"))
 
+    train_len = len(papers["train"])
     all_papers = papers["train"] + papers["test"]
-    titles = []
-    abstracts = []
+    paper_ids_idx_mapping = feat.build_paper_ids_idx_mapping(all_papers)
 
-    for paper in all_papers:
-        titles.append(paper["title"])
-        abstracts.append(paper["abstract"])
+    hard_neg_list = []
+    for i in range(len(paper_ids_idx_mapping)):
+        hard_neg_list.append(feat.get_hard_neg(i, paper_ids_idx_mapping, all_papers))
 
-    a = torch.load("dblp_encoded.pth")
-    print(a["encoded"]["input_ids"].shape)
-    print(len(a["paper_ids_idx_mapping"]))
-    
-    encoded = feat.get_input(titles[-2:], abstracts[-2:])
-    encoding = {}
-    for k in encoded:
-        encoding[k] = torch.cat([a["encoded"][k], encoded[k]])
-        print(encoding[k].shape)
+    assert len(all_papers) == len(hard_neg_list)
 
-    torch.save(
-        {"encoded": encoding, "paper_ids_idx_mapping": a["paper_ids_idx_mapping"]},
-        f"dblp_encoded_hi.pth",
-    )
+    for paper, hard_neg in zip(all_papers, hard_neg_list):
+        paper["hard"] = hard_neg
 
-
-    # print(len(all_papers))
-    # batch_size = len(all_papers) // 5
-    # for i in range(5):
-    #     encoded = feat.get_input(titles[i * batch_size:(i + 1) * batch_size], abstracts[i * batch_size:(i + 1) * batch_size])
-    #     paper_ids_idx_mapping = feat.build_paper_ids_idx_mapping(all_papers)
-
-    #     torch.save(
-    #         {"encoded": encoded.data, "paper_ids_idx_mapping": paper_ids_idx_mapping},
-    #         f"dblp_encoded_{i}.pth",
-    #     )
-
-    # del encoded
-
-    # # Training Dataset
-    # train_network = defaultdict(dict)
-
-    # # Mapping of ids -> idx
-    # train_paper_ids_idx_mapping = {
-    #     paper["ids"]: paper_ids_idx_mapping[paper["ids"]] for paper in papers["train"]
-    # }
-
-    # # Get all the positive from dataset
-    # for paper in papers["train"]:
-    #     train_network[paper["ids"]]["pos"] = feat.get_pos(paper)
-
-    # # Get all the hard negative from network
-    # for p in train_network.keys():
-    #     train_network[p]["hard"] = feat.get_hard_neg(p, train_network)
-
-    # torch.save(
-    #     {
-    #         "paper_ids_idx_mapping": train_paper_ids_idx_mapping,
-    #         "network": train_network,
-    #     },
-    #     f"dblp_train_file.pth",
-    # )
-
-    # # Test Dataset
-    # test_network = defaultdict(dict)
-
-    # # Mapping of ids -> idx
-    # test_paper_ids_idx_mapping = {
-    #     paper["ids"]: paper_ids_idx_mapping[paper["ids"]] for paper in papers["test"]
-    # }
-
-    # for paper in papers["test"]:
-    #     test_network[paper["ids"]]["pos"] = feat.get_pos(paper)
-
-    # for p in test_network.keys():
-    #     test_network[p]["hard"] = feat.get_hard_neg(p, test_network)
-
-    # torch.save(
-    #     {
-    #         "paper_ids_idx_mapping": test_paper_ids_idx_mapping,
-    #         "network": test_network,
-    #     },
-    #     f"dblp_test_file.pth",
-    # )
+    with open("./dblp_train_test_dataset.json", "w") as f:
+        json.dump(
+            {
+                "mapping": paper_ids_idx_mapping,
+                "train": all_papers[:train_len],
+                "test": all_papers[train_len:],
+            },
+            f,
+            indent=2,
+        )

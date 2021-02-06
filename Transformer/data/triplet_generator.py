@@ -1,4 +1,4 @@
-from typing import List, Tuple, Dict, Optional, Iterator, Set
+from typing import List, Tuple, Dict, Optional, Iterator, Set, Any
 
 import math
 import random
@@ -7,16 +7,16 @@ import random
 class TripletGenerator:
     def __init__(
         self,
-        query_paper_ids: List[str],
+        query_paper_ids_idx_mapping: Dict[str, int],
         candidate_papers_ids: Set[str],
-        network: Dict[str, Dict[str, List[str]]],
+        dataset: List[Dict[str, Any]],
         samples_per_query: int,
         ratio_hard_neg: Optional[float] = 0.5,
     ):
-        self.query_papers_ids = query_paper_ids
-        self.query_papers_ids_set = set(query_paper_ids)
+        self.query_paper_ids_idx_mapping = query_paper_ids_idx_mapping
         self.candidate_papers_ids = candidate_papers_ids
-        self.network = network
+        self.dataset = dataset
+        
         self.samples_per_query = samples_per_query
         self.ratio_hard_neg = ratio_hard_neg
 
@@ -30,15 +30,16 @@ class TripletGenerator:
             query_id: number specifying index of query paper
             n_easy_samples: number of easy samples to output
         """
+        query_idx = self.query_paper_ids_idx_mapping[query_id]
         not_easy_neg_candidates = (
-            self.network[query_id]["pos"] + self.network[query_id]["hard"] + [query_id]
+            self.dataset[query_idx]["citations"] + self.dataset[query_idx]["hard"] + [query_id]
         )
         easy_neg_candidates = list(
             self.candidate_papers_ids.difference(not_easy_neg_candidates)
         )
 
         easy_samples = []
-        pos_candidates = list(set(self.network[query_id]["pos"]) & self.candidate_papers_ids)
+        pos_candidates = list(set(self.dataset[query_idx]["citations"]) & self.candidate_papers_ids)
         if pos_candidates and easy_neg_candidates:
             for _ in range(n_easy_samples):
                 pos = random.choice(pos_candidates)
@@ -52,14 +53,15 @@ class TripletGenerator:
     ) -> List[Tuple[str, str, str]]:
         # if there aren't enough candidates to generate enough unique samples
         # reduce the number of samples to make it possible for them to be unique
+        query_idx = self.query_paper_ids_idx_mapping[query_id]
         n_hard_samples = min(
             n_hard_samples,
-            len(self.network[query_id]["pos"] * len(self.network[query_id]["hard"])),
+            len(self.dataset[query_idx]["citations"] * len(self.dataset[query_idx]["hard"])),
         )
 
         hard_samples = []
-        pos_candidates = list(set(self.network[query_id]["pos"]) & self.candidate_papers_ids)
-        hard_neg_candidates = list(self.candidate_papers_ids & set(self.network[query_id]["hard"]))
+        pos_candidates = list(set(self.dataset[query_idx]["citations"]) & self.candidate_papers_ids)
+        hard_neg_candidates = list(self.candidate_papers_ids & set(self.dataset[query_idx]["hard"]))
 
         if pos_candidates and hard_neg_candidates:
             for _ in range(n_hard_samples):
@@ -70,10 +72,6 @@ class TripletGenerator:
         return hard_samples
 
     def _get_triplet(self, query_id: str) -> List[Tuple[str, str, str]]:
-        if query_id not in self.query_papers_ids_set:
-            print("Not in")
-            return None
-
         n_hard_samples = math.ceil(self.ratio_hard_neg * self.samples_per_query)
         n_easy_samples = self.samples_per_query - n_hard_samples
 
@@ -91,10 +89,10 @@ class TripletGenerator:
         """
         skipped = 0
         success = 0
-
-        for query_id in self.network:
-            results = self._get_triplet(query_id)
-            if results:
+    
+        for data in self.dataset:
+            if data["paper_ids"] in self.query_paper_ids_idx_mapping:
+                results = self._get_triplet(data["paper_ids"])
                 for triplet in results:
 
                     yield triplet
@@ -102,5 +100,3 @@ class TripletGenerator:
 
             else:
                 skipped += 1
-
-        # print(success, skipped)

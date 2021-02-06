@@ -9,9 +9,10 @@ import transformers
 
 from model.embedding_model import EmbeddingModel
 from model.triplet_loss import TripletLoss
-from data.dataset import PaperDataset
+from data.dataset import TripletIterableDataset, TripletCollator
 from utils import distributed
 
+import json
 from tqdm import tqdm
 import argparse
 import random
@@ -28,7 +29,7 @@ def train_one_epoch(
     logger.info(f"===Training epoch {epoch}===")
     model.train()
     for i, (q, p, n) in enumerate(
-        tqdm(train_dataloader), epoch * len(train_dataloader)       # Need check
+        tqdm(train_dataloader), epoch * len(train_dataloader)  # Need check
     ):
         q, p, n = (
             to_device_dict(q, device),
@@ -76,19 +77,20 @@ def eval(model, eval_dataloader, criterion, epoch, writer, config):
             negative_embedding = model(n)
 
             loss = criterion(query_embedding, positive_embedding, negative_embedding)
-    
+
             if i % 50 == 0:
                 if config.distributed:
                     loss_recorded = distributed.reduce_mean(loss)
                 else:
                     loss_recorded = loss
-                
+
                 loss_list.append(loss_recorded.item())
 
     epoch_loss = torch.tensor(loss_list, dtype=torch.float).mean()
 
     if writer:
         writer.add_scalar("val/loss", epoch_loss, epoch)
+
 
 def to_device_dict(d, device):
     return {k: v.to(device) for k, v in d.items()}
@@ -104,9 +106,9 @@ if __name__ == "__main__":
     parser.add_argument("--accumulate_step_size", type=int, default=4)
     parser.add_argument("--batch_size", type=int, default=8)
 
-    parser.add_argument('--samples_per_query', type=int, default=5)
-    parser.add_argument('--ratio_hard_neg', type=float, default=0.5)
-    parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument("--samples_per_query", type=int, default=5)
+    parser.add_argument("--ratio_hard_neg", type=float, default=0.5)
+    parser.add_argument("--seed", type=int, default=42)
 
     config = parser.parse_args()
     distributed.init_distributed_mode(config)
@@ -115,28 +117,41 @@ if __name__ == "__main__":
 
     model = EmbeddingModel(config).to(device)
     criterion = TripletLoss()
-    
+
     random.seed(config.seed)
 
     if config.distributed:
         model = nn.parallel.DistributedDataParallel(model, device_ids=[config.gpu])
         config.batch_size //= config.world_size
 
-    train_paper_dataset = PaperDataset("./dblp_train_file.pth", "./dblp_encoded_hi.pth", config)
-    train_triplet_dataset = train_paper_dataset.get_triplet_dataset(
-        train_paper_dataset.paper_ids_idx_mapping
+    with open("./dblp_train_test_dataset.json", "r") as f:
+        data_json = json.load(f)
+        paper_ids_idx_mapping = data_json["mapping"]
+        train_dataset = data_json["train"]
+        test_dataset = data_json["test"]
+
+    train_query_paper_ids_idx_mapping = {
+        data["paper_ids"]: i for i, data in enumerate(train_dataset)
+    }
+    train_triplet_dataset = TripletIterableDataset(
+        train_dataset,
+        train_query_paper_ids_idx_mapping,
+        train_query_paper_ids_idx_mapping,
+        5,
     )
 
-    test_paper_dataset = PaperDataset("./dblp_test_file.pth", "./dblp_encoded_hi.pth", config)
-    test_triplet_dataset = test_paper_dataset.get_triplet_dataset(
-        {
-            **train_paper_dataset.paper_ids_idx_mapping,
-            **test_paper_dataset.paper_ids_idx_mapping,
-        }
+    test_query_paper_ids_idx_mapping = {
+        data["paper_ids"]: i for i, data in enumerate(test_dataset)
+    }
+    test_triplet_dataset = TripletIterableDataset(
+        test_dataset,
+        test_query_paper_ids_idx_mapping,
+        {**train_query_paper_ids_idx_mapping, **test_query_paper_ids_idx_mapping},
+        5
     )
-    test_paper_pos_dataset = test_paper_dataset.get_paper_pos_dataset(
-        train_paper_dataset.paper_ids_idx_mapping
-    )
+
+    tokenizer = transformers.AutoTokenizer(config.model_name)
+    collater = TripletCollator(tokenizer)
 
     if config.distributed:
         train_triplet_sampler = DistributedSampler(train_triplet_dataset, shuffle=False)
@@ -149,16 +164,18 @@ if __name__ == "__main__":
     train_triplet_dataloader = DataLoader(
         train_triplet_dataset,
         batch_size=config.batch_size,
-        num_workers=12,
+        num_workers=2,
         pin_memory=True,
         sampler=train_triplet_sampler,
+        collate_fn=collater
     )
     test_triplet_dataloader = DataLoader(
         test_triplet_dataset,
         batch_size=config.batch_size,
-        num_workers=12,
+        num_workers=2,
         pin_memory=True,
         sampler=test_triplet_sampler,
+        collate_fn=collater
     )
 
     optimizer = optim.Adam(model.parameters(), lr=config.lr)
@@ -177,10 +194,18 @@ if __name__ == "__main__":
         if config.distributed:
             train_triplet_sampler.set_epoch(epoch)
         train_one_epoch(
-            model, train_triplet_dataloader, criterion, optimizer, scheduler, epoch, writer, config
+            model,
+            train_triplet_dataloader,
+            criterion,
+            optimizer,
+            scheduler,
+            epoch,
+            writer,
+            config,
         )
         eval(model, test_triplet_dataloader, criterion, epoch, writer, config)
 
-
         if distributed.is_main_process():
-            torch.save({'state_dict': model.module.state_dict()}, f'weights_{epoch}.pth')
+            torch.save(
+                {"state_dict": model.module.state_dict()}, f"weights_{epoch}.pth"
+            )
