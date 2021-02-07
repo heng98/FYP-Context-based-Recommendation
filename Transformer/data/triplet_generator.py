@@ -2,6 +2,7 @@ from typing import List, Tuple, Dict, Optional, Iterator, Set, Any
 
 import math
 import random
+from tqdm import tqdm
 
 
 class TripletGenerator:
@@ -16,7 +17,7 @@ class TripletGenerator:
         self.query_paper_ids_idx_mapping = query_paper_ids_idx_mapping
         self.candidate_papers_ids = candidate_papers_ids
         self.dataset = dataset
-        
+
         self.samples_per_query = samples_per_query
         self.ratio_hard_neg = ratio_hard_neg
 
@@ -32,14 +33,18 @@ class TripletGenerator:
         """
         query_idx = self.query_paper_ids_idx_mapping[query_id]
         not_easy_neg_candidates = (
-            self.dataset[query_idx]["citations"] + self.dataset[query_idx]["hard"] + [query_id]
+            self.dataset[query_idx]["citations"]
+            + self.dataset[query_idx]["hard"]
+            + [query_id]
         )
         easy_neg_candidates = list(
             self.candidate_papers_ids.difference(not_easy_neg_candidates)
         )
 
         easy_samples = []
-        pos_candidates = list(set(self.dataset[query_idx]["citations"]) & self.candidate_papers_ids)
+        pos_candidates = list(
+            set(self.dataset[query_idx]["citations"]) & self.candidate_papers_ids
+        )
         if pos_candidates and easy_neg_candidates:
             for _ in range(n_easy_samples):
                 pos = random.choice(pos_candidates)
@@ -56,12 +61,19 @@ class TripletGenerator:
         query_idx = self.query_paper_ids_idx_mapping[query_id]
         n_hard_samples = min(
             n_hard_samples,
-            len(self.dataset[query_idx]["citations"] * len(self.dataset[query_idx]["hard"])),
+            len(
+                self.dataset[query_idx]["citations"]
+                * len(self.dataset[query_idx]["hard"])
+            ),
         )
 
         hard_samples = []
-        pos_candidates = list(set(self.dataset[query_idx]["citations"]) & self.candidate_papers_ids)
-        hard_neg_candidates = list(self.candidate_papers_ids & set(self.dataset[query_idx]["hard"]))
+        pos_candidates = list(
+            set(self.dataset[query_idx]["citations"]) & self.candidate_papers_ids
+        )
+        hard_neg_candidates = list(
+            self.candidate_papers_ids & set(self.dataset[query_idx]["hard"])
+        )
 
         if pos_candidates and hard_neg_candidates:
             for _ in range(n_hard_samples):
@@ -89,10 +101,10 @@ class TripletGenerator:
         """
         skipped = 0
         success = 0
-    
-        for data in self.dataset:
-            if data["paper_ids"] in self.query_paper_ids_idx_mapping:
-                results = self._get_triplet(data["paper_ids"])
+
+        for data in tqdm(self.dataset):
+            if data["ids"] in self.query_paper_ids_idx_mapping:
+                results = self._get_triplet(data["ids"])
                 for triplet in results:
 
                     yield triplet
@@ -100,3 +112,68 @@ class TripletGenerator:
 
             else:
                 skipped += 1
+
+
+if __name__ == "__main__":
+    import pickle
+    import json
+    from tqdm import tqdm
+
+    with open("aan_dataset.json", "r") as f:
+        data_json = json.load(f)
+        paper_ids_idx_mapping = data_json["mapping"]
+        train_dataset = data_json["train"]
+        test_dataset = data_json["test"]
+
+    train_query_paper_ids_idx_mapping = {
+        data["ids"]: i for i, data in enumerate(train_dataset)
+    }
+    test_query_paper_ids_idx_mapping = {
+        data["ids"]: i for i, data in enumerate(test_dataset)
+    }
+
+    train_triplet_generator = TripletGenerator(
+        train_query_paper_ids_idx_mapping,
+        set(train_query_paper_ids_idx_mapping.keys()),
+        train_dataset,
+        5,
+    )
+
+    test_candidate_mapping = {
+        **train_query_paper_ids_idx_mapping,
+        **test_query_paper_ids_idx_mapping,
+    }
+    test_triplet_generator = TripletGenerator(
+        test_query_paper_ids_idx_mapping,
+        set(test_candidate_mapping.keys()),
+        test_dataset,
+        5,
+    )
+
+    train_triplet_with_ids = list(
+        train_triplet_generator.generate_triplets(),
+    )
+    test_triplet_with_ids = list(
+        test_triplet_generator.generate_triplets(),
+    )
+
+    train_triplet = [
+        (
+            train_query_paper_ids_idx_mapping[q],
+            train_query_paper_ids_idx_mapping[p],
+            train_query_paper_ids_idx_mapping[n],
+        )
+        for q, p, n in train_triplet_with_ids
+    ]
+
+    test_triplet = [
+        (
+            test_query_paper_ids_idx_mapping[q],
+            test_candidate_mapping[p],
+            test_candidate_mapping[n],
+        )
+        for q, p, n in test_triplet_with_ids
+    ]
+
+    with open("aan_triplet.pkl", "wb") as f:
+        pickle.dump({"train": train_triplet, "test": test_triplet}, f)
