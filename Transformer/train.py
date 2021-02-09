@@ -9,7 +9,7 @@ import transformers
 
 from model.embedding_model import EmbeddingModel
 from model.triplet_loss import TripletLoss
-from data.dataset import TripletIterableDataset, TripletCollator
+from data.dataset import TripletDataset, TripletCollator
 from utils import distributed
 
 import json
@@ -17,6 +17,7 @@ from tqdm import tqdm
 import argparse
 import random
 import logging
+import pickle
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -102,7 +103,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_name", type=str, default="allenai/scibert_scivocab_cased"
     )
-    parser.add_argument("--lr", type=float, default=1e-5)
+    parser.add_argument("--lr", type=float, default=2e-5)
     parser.add_argument("--accumulate_step_size", type=int, default=4)
     parser.add_argument("--batch_size", type=int, default=8)
 
@@ -124,37 +125,23 @@ if __name__ == "__main__":
         model = nn.parallel.DistributedDataParallel(model, device_ids=[config.gpu])
         config.batch_size //= config.world_size
 
-    with open("./dblp_train_test_dataset.json", "r") as f:
-        data_json = json.load(f)
-        paper_ids_idx_mapping = data_json["mapping"]
-        train_dataset = data_json["train"]
-        test_dataset = data_json["test"]
+    with open("dblp_triplet.pkl", "rb") as f:
+        unpickled_data = pickle.load(f)
 
-    train_query_paper_ids_idx_mapping = {
-        data["paper_ids"]: i for i, data in enumerate(train_dataset)
-    }
-    train_triplet_dataset = TripletIterableDataset(
-        train_dataset,
-        train_query_paper_ids_idx_mapping,
-        train_query_paper_ids_idx_mapping,
-        5,
+    train_triplet_dataset = TripletDataset(
+        unpickled_data["train"],
+        unpickled_data["dataset"]
     )
-
-    test_query_paper_ids_idx_mapping = {
-        data["paper_ids"]: i for i, data in enumerate(test_dataset)
-    }
-    test_triplet_dataset = TripletIterableDataset(
-        test_dataset,
-        test_query_paper_ids_idx_mapping,
-        {**train_query_paper_ids_idx_mapping, **test_query_paper_ids_idx_mapping},
-        5
+    test_triplet_dataset = TripletDataset(
+        unpickled_data["test"],
+        unpickled_data["dataset"]
     )
-
-    tokenizer = transformers.AutoTokenizer(config.model_name)
+    
+    tokenizer = transformers.AutoTokenizer.from_pretrained(config.model_name)
     collater = TripletCollator(tokenizer)
 
     if config.distributed:
-        train_triplet_sampler = DistributedSampler(train_triplet_dataset, shuffle=False)
+        train_triplet_sampler = DistributedSampler(train_triplet_dataset, shuffle=True)
         test_triplet_sampler = DistributedSampler(test_triplet_dataset, shuffle=False)
     else:
         # Initialize this instead of using shuffle args in DataLoader

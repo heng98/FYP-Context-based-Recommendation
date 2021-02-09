@@ -37,86 +37,59 @@ class PaperPosDataset(Dataset):
         return len(self.paper_ids_list)
 
 
-# class TripletDataset(Dataset):
+class TripletDataset(Dataset):
+    def __init__(
+        self,
+        triplet_list,
+        dataset
+    ):
+        super(TripletDataset, self).__init__()
+        
+        self.triplet_list = triplet_list
+        self.dataset = dataset
+
+    def __getitem__(self, index: int):
+        triplet = self.triplet_list[index]
+        query = self.dataset[triplet[0]]
+        pos = self.dataset[triplet[1]]
+        neg = self.dataset[triplet[2]]
+    
+        return query, pos, neg
+
+    def __len__(self) -> int:
+        return len(self.triplet_list)
+
+
+# class TripletIterableDataset(IterableDataset):
 #     def __init__(
 #         self,
+#         dataset: List[Dict[str, Any]],
 #         query_paper_ids_idx_mapping: Dict[str, int],
-#         encoded: Dict[str, torch.Tensor],
-#         network: Dict[str, List[str]],
 #         candidate_paper_ids_idx_mapping: Dict[str, int],
 #         samples_per_query: int,
 #         ratio_hard_neg: Optional[float] = 0.5,
 #     ):
-#         super(TripletDataset, self).__init__()
+#         super(TripletIterableDataset, self).__init__()
 
+#         self.dataset = dataset
 #         self.query_paper_ids_idx_mapping = query_paper_ids_idx_mapping
-#         self.encoded = encoded
-#         self.network = network
 #         self.candidate_paper_ids_idx_mapping = candidate_paper_ids_idx_mapping
 
-#         self.paper_ids_list = list(self.query_paper_ids_idx_mapping.keys())
-
 #         self.triplet_generator = TripletGenerator(
-#             self.paper_ids_list,
-#             set(candidate_paper_ids_idx_mapping.keys()),
-#             self.network,
+#             list(self.query_paper_ids_idx_mapping.values()),
+#             set(self.query_paper_ids_idx_mapping),
+#             dataset,
 #             samples_per_query,
-#             ratio_hard_neg=ratio_hard_neg,
+#             ratio_hard_neg,
 #         )
 
-#         self.triplet = []
+#     def __iter__(self):
 #         for triplet in self.triplet_generator.generate_triplets():
-#             self.triplet.append(triplet)
+#             query_idx = self.query_paper_ids_idx_mapping[triplet[0]]
+#             pos_idx = self.candidate_paper_ids_idx_mapping[triplet[1]]
+#             neg_idx = self.candidate_paper_ids_idx_mapping[triplet[2]]
 
-#         self.triplet = list(set(self.triplet))
-
-#     def __getitem__(self, index: int):
-#         triplet = self.triplet[index]
-
-#         query_idx = self.query_paper_ids_idx_mapping[triplet[0]]
-#         pos_idx = self.candidate_paper_ids_idx_mapping[triplet[1]]
-#         neg_idx = self.candidate_paper_ids_idx_mapping[triplet[2]]
-
-#         query = {k: v[query_idx] for k, v in self.encoded.items()}
-#         pos = {k: v[pos_idx] for k, v in self.encoded.items()}
-#         neg = {k: v[neg_idx] for k, v in self.encoded.items()}
-
-#         return query, pos, neg
-
-#     def __len__(self) -> int:
-#         return len(self.triplet)
-
-
-class TripletIterableDataset(IterableDataset):
-    def __init__(
-        self,
-        dataset: List[Dict[str, Any]],
-        query_paper_ids_idx_mapping: Dict[str, int],
-        candidate_paper_ids_idx_mapping: Dict[str, int],
-        samples_per_query: int,
-        ratio_hard_neg: Optional[float] = 0.5,
-    ):
-        super(TripletIterableDataset, self).__init__()
-
-        self.dataset = dataset
-        self.query_paper_ids_idx_mapping = query_paper_ids_idx_mapping
-        self.candidate_paper_ids_idx_mapping = candidate_paper_ids_idx_mapping
-
-        self.triplet_generator = TripletGenerator(
-            list(self.query_paper_ids_idx_mapping.values()),
-            set(self.query_paper_ids_idx_mapping),
-            dataset,
-            samples_per_query,
-            ratio_hard_neg,
-        )
-
-    def __iter__(self):
-        for triplet in self.triplet_generator.generate_triplets():
-            query_idx = self.query_paper_ids_idx_mapping[triplet[0]]
-            pos_idx = self.candidate_paper_ids_idx_mapping[triplet[1]]
-            neg_idx = self.candidate_paper_ids_idx_mapping[triplet[2]]
-
-            yield self.dataset[query_idx], self.dataset[pos_idx], self.dataset[neg_idx]
+#             yield self.dataset[query_idx], self.dataset[pos_idx], self.dataset[neg_idx]
 
 
 class TripletCollator:
@@ -127,10 +100,10 @@ class TripletCollator:
         query_title = [data[0]["title"] for data in batch]
         query_abstract = [data[0]["abstract"] for data in batch]
 
-        pos_title = [data[1]["title"] for data in batch[1]]
+        pos_title = [data[1]["title"] for data in batch]
         pos_abstract = [data[1]["abstract"] for data in batch]
 
-        neg_title = [data[2]["title"] for data in batch[2]]
+        neg_title = [data[2]["title"] for data in batch]
         neg_abstract = [data[2]["abstract"] for data in batch]
 
         query_encoded = self._encode(query_title, query_abstract)

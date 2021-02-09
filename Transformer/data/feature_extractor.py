@@ -3,6 +3,10 @@ from typing import List, Dict, Any
 import json
 import logging
 
+from collections import Counter
+from tqdm import tqdm
+from concurrent.futures import ProcessPoolExecutor
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 
@@ -29,14 +33,14 @@ class FeatureExtractor:
         all_papers: List[Dict[str, Any]],
     ) -> List[str]:
         query_paper = all_papers[query_paper_idx]
-        pos = set(query_paper["citations"])
+        pos = set(query_paper["pos"])
         hard_neg = set()
 
         # Get postive of positive of query paper
         for p in pos:
             if p in paper_ids_idx_mapping:
                 paper_idx = paper_ids_idx_mapping[p]
-                hard_neg.update(all_papers[paper_idx]["citations"])
+                hard_neg.update(all_papers[paper_idx]["pos"])
             else:
                 logger.info(f"Abstract is not in paper with ids {p}")
 
@@ -45,31 +49,49 @@ class FeatureExtractor:
         return list(hard_neg)
 
 
+
+
+
 if __name__ == "__main__":
     feat = FeatureExtractor()
     path = "./dblp_dataset.json"
     papers = json.load(open(path, "r"))
 
-    train_len = len(papers["train"])
-    all_papers = papers["train"] + papers["test"]
-    paper_ids_idx_mapping = feat.build_paper_ids_idx_mapping(all_papers)
+    candidate_paper = list(filter(lambda x: (x["year"] > 2014) and (len(x["citations"])>7), papers["papers"]))
+    
+    paper_ids_idx_mapping = feat.build_paper_ids_idx_mapping(candidate_paper)
 
-    hard_neg_list = []
-    for i in range(len(paper_ids_idx_mapping)):
-        hard_neg_list.append(feat.get_hard_neg(i, paper_ids_idx_mapping, all_papers))
+    def get_pos(p):
+        p["pos"] = list(set(p.pop("citations")) & set(paper_ids_idx_mapping))
+        return p
 
-    assert len(all_papers) == len(hard_neg_list)
+    def get_hard_neg(i):
+        hard_neg = feat.get_hard_neg(i, paper_ids_idx_mapping, candidate_paper)
+        candidate_paper[i]["hard_neg"] = hard_neg
 
-    for paper, hard_neg in zip(all_papers, hard_neg_list):
-        paper["hard"] = hard_neg
+        return candidate_paper[i]
+
+    with ProcessPoolExecutor() as executor:
+        candidate_paper = list(executor.map(get_pos, tqdm(candidate_paper)))
+    logger.info("Extracting Hard Neg")
+    with ProcessPoolExecutor() as executor:
+        candidate_paper = list(executor.map(get_hard_neg, tqdm(range(len(candidate_paper)))))
+
+    train_paper = list(filter(lambda x: (x["year"] <= 2016), candidate_paper))
+    test_paper = list(filter(lambda x: (x["year"] > 2016), candidate_paper))
+
+    train_mapping = feat.build_paper_ids_idx_mapping(train_paper)
+    test_mapping = feat.build_paper_ids_idx_mapping(test_paper)
+
+
 
     with open("./dblp_train_test_dataset.json", "w") as f:
         json.dump(
-            {
+            {   
                 "mapping": paper_ids_idx_mapping,
-                "train": all_papers[:train_len],
-                "test": all_papers[train_len:],
-            },
+                "train": train_paper,
+                "test": test_paper
+            },  
             f,
             indent=2,
         )

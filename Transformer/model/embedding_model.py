@@ -20,7 +20,7 @@ class EmbeddingModel(nn.Module):
             input_ids=input["input_ids"],
             attention_mask=input["attention_mask"],
             token_type_ids=input["token_type_ids"],
-            position_ids=self.position_ids,
+            position_ids=self.position_ids.clone(),
         )
         doc_embedding = output["last_hidden_state"][:, 0]
 

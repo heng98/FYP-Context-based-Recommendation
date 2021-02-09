@@ -39,7 +39,7 @@ class TripletLoss(nn.Module):
 
         distance_positive = self.distance_f(query, positive)
         distance_negative = self.distance_f(query, negative)
-        loss = F.relu(distance_positive - distance_negative + self.margin)
+        loss = F.relu(- distance_positive + distance_negative + self.margin)
         loss = loss.mean()
         
         return loss
