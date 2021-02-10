@@ -3,19 +3,19 @@ import numpy as np
 
 class ANNCandidateSelector:
     def __init__(
-        self, ann, neighbour_candidate, train_paper_dataset, extend_candidate=True
+        self, ann, neighbour_candidate, train_paper_dataset, mapping, extend_candidate=True
     ):
         self.ann = ann
         self.neighbour_candidate = neighbour_candidate
         self.extend_candidate = extend_candidate
 
         self.train_paper_dataset = train_paper_dataset
+        self.mapping = mapping
 
     def get_candidate(self, query_embedding):
         candidate = self.ann.get_k_nearest_neighbour(
             query_embedding, self.neighbour_candidate
         )
-
         if self.extend_candidate:
             candidate_set = set(candidate)
             for i in candidate:

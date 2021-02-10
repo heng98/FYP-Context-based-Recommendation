@@ -43,9 +43,10 @@ def train_one_epoch(
         positive_embedding = model(p)
         negative_embedding = model(n)
 
-        loss = criterion(query_embedding, positive_embedding, negative_embedding)
+        loss = criterion(query_embedding, positive_embedding, negative_embedding) / 4
+        loss.backward()
 
-        if i % 50 == 0:
+        if (i + 1) % 50 == 0:
             if config.distributed:
                 loss_recorded = distributed.reduce_mean(loss)
             else:
@@ -53,8 +54,6 @@ def train_one_epoch(
 
             if writer:
                 writer.add_scalar("train/loss", loss_recorded.item(), i)
-
-        loss.backward()
 
         if (i + 1) % 4 == 0:
             optimizer.step()

@@ -8,33 +8,39 @@ from .triplet_generator import TripletGenerator
 class PaperPosDataset(Dataset):
     def __init__(
         self,
-        paper_ids_idx_mapping: Dict[str, int],
-        encoded: Dict[str, torch.Tensor],
-        network: Dict[str, List[str]],
-        candidate_paper_ids_idx_mapping: Dict[str, int],
+        dataset: List[Dict[str, Any]],
+        candidate_paper: Dict[str, int],
+        tokenizer
     ):
         super(PaperPosDataset, self).__init__()
+        self.dataset = dataset
+        self.candidate_paper = candidate_paper
+        self.candidate_paper_set = set(candidate_paper)
+        self.tokenizer = tokenizer
 
-        self.paper_ids_idx_mapping = paper_ids_idx_mapping
-        self.encoded = encoded
-        self.network = network
-        self.candidate_paper_ids_idx_mapping = candidate_paper_ids_idx_mapping
-
-        self.paper_ids_list = list(self.paper_ids_idx_mapping.keys())
-
+        self.cache = {}
+        
     def __getitem__(self, index: int):
-        paper_ids = self.paper_ids_list[index]
-        converted_idx = self.paper_ids_idx_mapping[paper_ids]
-        encoded = {k: v[converted_idx] for k, v in self.encoded.items()}
-        positive_candidates = set(self.network[paper_ids]["pos"]) & set(
-            self.candidate_paper_ids_idx_mapping.keys()
+        data = self.dataset[index]
+        encoded = self.tokenizer(
+            data["title"],
+            data["abstract"],
+            padding="max_length",
+            max_length=512,
+            truncation=True,
+            return_tensors="pt",
         )
-        pos = [self.candidate_paper_ids_idx_mapping[ids] for ids in positive_candidates]
 
-        return encoded, pos
+        if index not in self.cache:
+            positive_candidates = set(data["pos"]) & self.candidate_paper_set
+            self.cache[index] = positive_candidates
+        else:
+            positive_candidates = self.cache[index]
+
+        return encoded, [self.candidate_paper[ids] for ids in positive_candidates]
 
     def __len__(self) -> int:
-        return len(self.paper_ids_list)
+        return len(self.dataset)
 
 
 class TripletDataset(Dataset):

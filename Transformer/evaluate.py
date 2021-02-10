@@ -2,14 +2,17 @@ import torch
 import numpy as np
 from sklearn.metrics import ndcg_score
 
+from torch.utils.data import DataLoader
 from model.embedding_model import EmbeddingModel
-from data.dataset import PaperDataset
+from data.dataset import PaperPosDataset
 from candidate_selector.ann.ann_annoy import ANNAnnoy
 from candidate_selector.ann.ann_candidate_selector import ANNCandidateSelector
 
 import argparse
+import json
 from tqdm import tqdm
 import logging
+from transformers import AutoTokenizer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -71,41 +74,45 @@ if __name__ == "__main__":
 
     model = EmbeddingModel(config)
     state_dict = torch.load(config.weight_path, map_location="cuda:1")["state_dict"]
-    temp_fix_state_dict = {}
-    for k, v in state_dict.items():
-        temp_fix_state_dict[k.replace("module.", "")] = v
 
-
-    model.load_state_dict(temp_fix_state_dict, strict=False)
-
-    device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
     
-    train_paper_dataset = PaperDataset("./train_file.pth", "./encoded.pth", config)
-    train_paper_pos_dataset = train_paper_dataset.get_paper_pos_dataset(
-        train_paper_dataset.paper_ids_idx_mapping
+    tokenizer = AutoTokenizer.from_pretrained(config.model_name)
+    with open("dblp_train_test_dataset.json", "r") as f:
+        dataset = json.load(f)
+
+    train_idx_paper_idx_mapping = {data["ids"]: idx for idx, data in enumerate(dataset["train"])}
+    train_paper_pos_dataset = PaperPosDataset(
+        dataset["train"],
+        train_idx_paper_idx_mapping,
+        tokenizer
     )
 
-    test_paper_dataset = PaperDataset("./test_file.pth", "./encoded.pth", config)
-    test_paper_pos_dataset = test_paper_dataset.get_paper_pos_dataset(
-        train_paper_dataset.paper_ids_idx_mapping
+    test_paper_pos_dataset = PaperPosDataset(
+        dataset["test"],
+        train_idx_paper_idx_mapping,
+        tokenizer
     )
+
+    # train_dataloader = DataLoader(train_paper_pos_dataset, num_workers=8)
+    # test_dataloader = DataLoader(test_paper_pos_dataset, num_workers=8)
 
     model.eval()
     with torch.no_grad():
         doc_embedding_vectors = torch.empty(len(train_paper_pos_dataset), 768)
         for i, (encoded, _) in enumerate(tqdm(train_paper_pos_dataset)):
-            encoded = {k: v.unsqueeze(0) for k, v in encoded.items()}
             encoded = to_device_dict(encoded, device)
     
             query_embedding = model(encoded)
             doc_embedding_vectors[i] = query_embedding
 
+        torch.save(doc_embedding_vectors, "embedding.pth")
         doc_embedding_vectors = doc_embedding_vectors.cpu().numpy()
         logger.info("Building Annoy Index")
         ann = ANNAnnoy.build_graph(doc_embedding_vectors)
         ann_candidate_selector = ANNCandidateSelector(
-            ann, 5, train_paper_pos_dataset
+            ann, 5, train_paper_pos_dataset, train_idx_paper_idx_mapping
         )
         mrr_list = []
         p_list = []
@@ -116,14 +123,13 @@ if __name__ == "__main__":
         logger.info("Evaluating")
         skipped = 0
         for i, (query, positive) in enumerate(tqdm(test_paper_pos_dataset)):
-            if len(positive) < 3:
+            if len(positive) < 1:
                 skipped += 1
                 continue
 
-            query = {k: v.unsqueeze(0) for k, v in query.items()}
             query = to_device_dict(query, device)
             query_embedding = model(query).cpu().numpy()[0]
-
+            
             # Check if top_k is sorted or not
             candidates = ann_candidate_selector.get_candidate(query_embedding)
 
