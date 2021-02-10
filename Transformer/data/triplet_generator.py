@@ -121,9 +121,8 @@ if __name__ == "__main__":
     import json
     from multiprocessing_generator import ParallelGenerator
 
-    with open("dblp_train_test_dataset.json", "r") as f:
+    with open("aan_train_test_dataset.json", "r") as f:
         data_json = json.load(f)
-        paper_ids_idx_mapping = data_json["mapping"]
         train_dataset = data_json["train"]
         test_dataset = data_json["test"]
 

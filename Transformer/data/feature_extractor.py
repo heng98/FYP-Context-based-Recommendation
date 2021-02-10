@@ -3,7 +3,7 @@ from typing import List, Dict, Any
 import json
 import logging
 
-from collections import Counter
+import argparse
 from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor
 
@@ -49,16 +49,31 @@ class FeatureExtractor:
         return list(hard_neg)
 
 
-
-
-
 if __name__ == "__main__":
-    feat = FeatureExtractor()
-    path = "./dblp_dataset.json"
-    papers = json.load(open(path, "r"))
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data_path", type=str, required=True)
+    parser.add_argument("--min_citation", type=int, default=-1)
+    parser.add_argument("--min_year", type=int, default=-1)
 
-    candidate_paper = list(filter(lambda x: (x["year"] > 2014) and (len(x["citations"])>7), papers["papers"]))
-    
+    parser.add_argument("--split_year", type=int, required=True)
+    parser.add_argument("--save_dir", type=str, required=True)
+
+    args = parser.parse_args()
+
+    feat = FeatureExtractor()
+    papers = json.load(open(args.data_path, "r"))
+
+    dataset_name = papers["name"]
+
+    # candidate_paper = papers["papers"]
+    candidate_paper = list(
+        filter(
+            lambda x: (x["year"] >= args.min_year)
+            and (len(x["citations"]) >= args.min_citation),
+            papers["papers"],
+        )
+    )
+
     paper_ids_idx_mapping = feat.build_paper_ids_idx_mapping(candidate_paper)
 
     def get_pos(p):
@@ -72,26 +87,25 @@ if __name__ == "__main__":
         return candidate_paper[i]
 
     with ProcessPoolExecutor() as executor:
-        candidate_paper = list(executor.map(get_pos, tqdm(candidate_paper)))
+        candidate_paper = list(tqdm(executor.map(get_pos, candidate_paper)))
+
     logger.info("Extracting Hard Neg")
     with ProcessPoolExecutor() as executor:
-        candidate_paper = list(executor.map(get_hard_neg, tqdm(range(len(candidate_paper)))))
+        candidate_paper = list(
+            tqdm(executor.map(get_hard_neg, range(len(candidate_paper))))
+        )
 
-    train_paper = list(filter(lambda x: (x["year"] <= 2016), candidate_paper))
-    test_paper = list(filter(lambda x: (x["year"] > 2016), candidate_paper))
+    train_paper = list(
+        filter(lambda x: (x["year"] <= args.split_year), candidate_paper)
+    )
+    test_paper = list(filter(lambda x: (x["year"] > args.split_year), candidate_paper))
 
-    train_mapping = feat.build_paper_ids_idx_mapping(train_paper)
-    test_mapping = feat.build_paper_ids_idx_mapping(test_paper)
-
-
-
-    with open("./dblp_train_test_dataset.json", "w") as f:
+    with open(f"./{dataset_name}_train_test_dataset.json", "w") as f:
         json.dump(
-            {   
-                "mapping": paper_ids_idx_mapping,
+            {
                 "train": train_paper,
-                "test": test_paper
-            },  
+                "test": test_paper,
+            },
             f,
             indent=2,
         )
