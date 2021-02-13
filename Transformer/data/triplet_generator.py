@@ -107,10 +107,11 @@ class TripletGenerator:
         for data in tqdm(self.dataset):
             if data["ids"] in self.query_paper_ids_idx_mapping:
                 results = self._get_triplet(data["ids"])
-                for triplet in results:
+                if len(results) > 2:
+                    for triplet in results:
 
-                    yield triplet
-                success += 1
+                        yield triplet
+                    success += 1
 
             else:
                 skipped += 1
@@ -121,7 +122,7 @@ if __name__ == "__main__":
     import json
     from multiprocessing_generator import ParallelGenerator
 
-    with open("aan_train_test_dataset.json", "r") as f:
+    with open("AAN_train_test_dataset.json", "r") as f:
         data_json = json.load(f)
         train_dataset = data_json["train"]
         test_dataset = data_json["test"]
@@ -132,9 +133,7 @@ if __name__ == "__main__":
     train_paper_ids_idx_mapping = {
         data["ids"]: i for i, data in enumerate(train_dataset)
     }
-    test_paper_ids_idx_mapping = {
-        data["ids"]: i for i, data in enumerate(test_dataset)
-    }
+    test_paper_ids_idx_mapping = {data["ids"]: i for i, data in enumerate(test_dataset)}
 
     train_candidate = {p["ids"] for p in train_dataset}
     test_candidate = set(all_query_paper_ids_idx_mapping.keys())
@@ -157,12 +156,11 @@ if __name__ == "__main__":
         train_triplet_generator.generate_triplets(),
         max_lookahead=100,
     ) as g:
-        
+
         train_triplet_with_ids = list(tqdm(g))
 
     with ParallelGenerator(
-        test_triplet_generator.generate_triplets(),
-        max_lookahead=100
+        test_triplet_generator.generate_triplets(), max_lookahead=100
     ) as g:
         test_triplet_with_ids = list(tqdm(g))
 
@@ -188,8 +186,8 @@ if __name__ == "__main__":
         pickle.dump(
             {
                 "dataset": train_dataset + test_dataset,
-                "train": train_triplet, 
-                "test": test_triplet
-            }, 
-            f
+                "train": list(set(train_triplet)),
+                "test": list(set(test_triplet)),
+            },
+            f,
         )
