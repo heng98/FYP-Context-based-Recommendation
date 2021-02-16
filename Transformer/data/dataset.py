@@ -1,8 +1,6 @@
 import torch
-from torch.utils.data import Dataset, IterableDataset
-from typing import NoReturn, Dict, List, Any, Tuple, Set, Optional
-
-from .triplet_generator import TripletGenerator
+from torch.utils.data import Dataset
+from typing import Dict, List, Any
 
 
 class PaperPosDataset(Dataset):
@@ -43,6 +41,51 @@ class PaperPosDataset(Dataset):
         return len(self.dataset)
 
 
+class QueryPairDataset(Dataset):
+    def __init__(self, triplet_list, embedding):
+        super(QueryPairDataset, self).__init__()
+
+        query_pairs = []
+        label = []
+
+        for q, p, n in triplet_list:
+            query_pairs.extend([(q, p), (q, n)])
+            label.extend([1, 0])
+
+        assert len(query_pairs) == len(label)
+
+        self.query_pairs = query_pairs
+        self.label = label
+        self.embedding = embedding
+        # self.dataset = dataset
+
+    def __getitem__(self, index: int):
+        query_idx, candidate_idx = self.query_pairs[index]
+        query = self.embedding[query_idx]
+        candidate = self.embedding[candidate_idx]
+        label = self.label[index]
+
+        return query, candidate, label
+
+    def __len__(self) -> int:
+        return len(self.query_pairs)
+
+
+class QueryPairCollater:
+    def __init__(self, embedding):
+        self.embedding = embedding
+
+    def __call__(self, batch):
+        query_idx = [data[0] for data in batch]
+        candidate_idx = [data[1] for data in batch]
+        labels = [data[2] for data in batch]
+
+        query_embedding = self.embedding[query_idx]
+        candidate_embedding = self.embedding[candidate_idx]
+        labels = torch.tensor(labels, dtype=torch.float)
+
+        return query_embedding, candidate_embedding, labels
+
 class TripletDataset(Dataset):
     def __init__(
         self,
@@ -64,38 +107,6 @@ class TripletDataset(Dataset):
 
     def __len__(self) -> int:
         return len(self.triplet_list)
-
-
-# class TripletIterableDataset(IterableDataset):
-#     def __init__(
-#         self,
-#         dataset: List[Dict[str, Any]],
-#         query_paper_ids_idx_mapping: Dict[str, int],
-#         candidate_paper_ids_idx_mapping: Dict[str, int],
-#         samples_per_query: int,
-#         ratio_hard_neg: Optional[float] = 0.5,
-#     ):
-#         super(TripletIterableDataset, self).__init__()
-
-#         self.dataset = dataset
-#         self.query_paper_ids_idx_mapping = query_paper_ids_idx_mapping
-#         self.candidate_paper_ids_idx_mapping = candidate_paper_ids_idx_mapping
-
-#         self.triplet_generator = TripletGenerator(
-#             list(self.query_paper_ids_idx_mapping.values()),
-#             set(self.query_paper_ids_idx_mapping),
-#             dataset,
-#             samples_per_query,
-#             ratio_hard_neg,
-#         )
-
-#     def __iter__(self):
-#         for triplet in self.triplet_generator.generate_triplets():
-#             query_idx = self.query_paper_ids_idx_mapping[triplet[0]]
-#             pos_idx = self.candidate_paper_ids_idx_mapping[triplet[1]]
-#             neg_idx = self.candidate_paper_ids_idx_mapping[triplet[2]]
-
-#             yield self.dataset[query_idx], self.dataset[pos_idx], self.dataset[neg_idx]
 
 
 class TripletCollator:
@@ -129,35 +140,3 @@ class TripletCollator:
         )
 
 
-# class PaperDataset:
-#     def __init__(self, data_path: str, encoded_path: str, config):
-#         data_dict = torch.load(data_path)
-
-#         self.paper_ids_idx_mapping = data_dict["paper_ids_idx_mapping"]
-#         self.network = data_dict["network"]
-
-#         self.encoded = torch.load(encoded_path)["encoded"]
-#         self.config = config
-
-#         assert all(
-#             tensor.size(0) == self.encoded["input_ids"].size(0)
-#             for tensor in self.encoded.values()
-#         )
-
-#     def get_paper_pos_dataset(self, candidate_paper_ids_idx_mapping):
-#         return PaperPosDataset(
-#             self.paper_ids_idx_mapping,
-#             self.encoded,
-#             self.network,
-#             candidate_paper_ids_idx_mapping,
-#         )
-
-#     def get_triplet_dataset(self, candidate_paper_ids_idx_mapping):
-#         return TripletIterableDataset(
-#             self.paper_ids_idx_mapping,
-#             self.encoded,
-#             self.network,
-#             candidate_paper_ids_idx_mapping,
-#             self.config.samples_per_query,
-#             self.config.ratio_hard_neg
-#         )
