@@ -95,8 +95,9 @@ class TripletDataset(Dataset):
 
 
 class TripletCollator:
-    def __init__(self, tokenizer):
+    def __init__(self, tokenizer, max_seq_len):
         self.tokenizer = tokenizer
+        self.max_seq_len = max_seq_len
 
     def __call__(self, batch):
         query_title = [data[0]["title"] for data in batch]
@@ -119,7 +120,7 @@ class TripletCollator:
             title,
             abstract,
             padding="max_length",
-            max_length=512,
+            max_length=self.max_seq_len,
             truncation=True,
             return_tensors="pt",
         )

@@ -41,19 +41,24 @@ def train_one_epoch(
         positive_embedding = model(p)
         negative_embedding = model(n)
 
-        loss = criterion(query_embedding, positive_embedding, negative_embedding) / 4
+        loss = (
+            criterion(query_embedding, positive_embedding, negative_embedding)
+            / config.accumulate_step_size
+        )
         loss.backward()
 
         if (i + 1) % 50 == 0:
             if config.distributed:
-                loss_recorded = distributed.reduce_mean(loss * 4)
+                loss_recorded = distributed.reduce_mean(
+                    loss * config.accumulate_step_size
+                )
             else:
                 loss_recorded = loss.detach().clone()
 
             if writer:
                 writer.add_scalar("train/loss", loss_recorded.item(), i)
 
-        if (i + 1) % 4 == 0:
+        if (i + 1) % config.accumulate_step_size == 0:
             optimizer.step()
             optimizer.zero_grad()
             scheduler.step()
@@ -104,6 +109,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=2e-5)
     parser.add_argument("--accumulate_step_size", type=int, default=4)
     parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--max_seq_len", type=int, default=512)
 
     parser.add_argument("--experiment_name", type=str, required=True)
     parser.add_argument("--triplet_dataset_path", type=str, required=True)
@@ -134,7 +140,7 @@ if __name__ == "__main__":
     )
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(config.model_name)
-    collater = TripletCollator(tokenizer)
+    collater = TripletCollator(tokenizer, config.max_seq_len)
 
     if config.distributed:
         train_triplet_sampler = DistributedSampler(train_triplet_dataset, shuffle=True)
@@ -162,7 +168,9 @@ if __name__ == "__main__":
     )
 
     optimizer = optim.Adam(model.parameters(), lr=config.lr)
-    num_update_steps = len(train_triplet_dataloader) * config.epochs // config.accumulate_step_size
+    num_update_steps = (
+        len(train_triplet_dataloader) * config.epochs // config.accumulate_step_size
+    )
     scheduler = transformers.get_linear_schedule_with_warmup(
         optimizer,
         num_update_steps * 0.1,

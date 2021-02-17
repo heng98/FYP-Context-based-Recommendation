@@ -13,7 +13,7 @@ class EmbeddingModel(nn.Module):
             self.config.model_name, add_pooling_layer=False, return_dict=True
         )
 
-        self.register_buffer("position_ids", torch.arange(512).expand((1, -1)))
+        self.register_buffer("position_ids", torch.arange(config.max_seq_len).expand((1, -1)))
 
     def forward(self, input: Dict[str, torch.Tensor]) -> torch.Tensor:
         output = self.model(
