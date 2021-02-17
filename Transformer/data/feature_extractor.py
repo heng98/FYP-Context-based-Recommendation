@@ -55,7 +55,10 @@ if __name__ == "__main__":
     parser.add_argument("--min_citation", type=int, default=-1)
     parser.add_argument("--min_year", type=int, default=-1)
 
-    parser.add_argument("--split_year", type=int, required=True)
+    parser.add_argument("--train_range", type=str, required=True)
+    parser.add_argument("--val_range", type=str, required=True)
+    parser.add_argument("--test_range", type=str, required=True)
+
     parser.add_argument("--save_dir", type=str, required=True)
 
     args = parser.parse_args()
@@ -63,10 +66,18 @@ if __name__ == "__main__":
     feat = FeatureExtractor()
     papers = json.load(open(args.data_path, "r"))
 
+    train_range = tuple(int(year) for year in args.train_range.split("_"))
+    val_range = tuple(int(year) for year in args.val_range.split("_"))
+    test_range = tuple(int(year) for year in args.test_range.split("_"))
+
+    logger.info(f"Training range: From {train_range[0]} to {train_range[1]} inclusive")
+    logger.info(f"Validation range: From {val_range[0]} to {val_range[1]} inclusive")
+    logger.info(f"Testing range: From {test_range[0]} to {test_range[1]} inclusive")
+
     dataset_name = papers["name"]
 
-    # candidate_paper = papers["papers"]
-    candidate_paper = list(
+    all_paper = papers["papers"]
+    all_paper = list(
         filter(
             lambda x: (x["year"] >= args.min_year)
             and (len(x["citations"]) >= args.min_citation),
@@ -74,36 +85,63 @@ if __name__ == "__main__":
         )
     )
 
-    paper_ids_idx_mapping = feat.build_paper_ids_idx_mapping(candidate_paper)
+    paper_ids_idx_mapping = feat.build_paper_ids_idx_mapping(all_paper)
 
     def get_pos(p):
-        p["pos"] = list(set(p.pop("citations")) & set(paper_ids_idx_mapping))
+        citations = p.pop("citations")
+        pos = [
+            c
+            for c in citations
+            if c in paper_ids_idx_mapping
+            and all_paper[paper_ids_idx_mapping[c]]["year"] <= p["year"]
+        ]
+        p["pos"] = pos
         return p
 
     def get_hard_neg(i):
-        hard_neg = feat.get_hard_neg(i, paper_ids_idx_mapping, candidate_paper)
-        candidate_paper[i]["hard_neg"] = hard_neg
+        hard_neg = feat.get_hard_neg(i, paper_ids_idx_mapping, all_paper)
+        all_paper[i]["hard_neg"] = hard_neg
 
-        return candidate_paper[i]
+        return all_paper[i]
 
     with ProcessPoolExecutor() as executor:
-        candidate_paper = list(tqdm(executor.map(get_pos, candidate_paper)))
+        all_paper = list(
+            tqdm(executor.map(get_pos, all_paper), total=len(all_paper))
+        )
 
     logger.info("Extracting Hard Neg")
     with ProcessPoolExecutor() as executor:
-        candidate_paper = list(
-            tqdm(executor.map(get_hard_neg, range(len(candidate_paper))))
+        all_paper = list(
+            tqdm(
+                executor.map(
+                    get_hard_neg,
+                    range(len(all_paper)),
+                ),
+                total=len(all_paper),
+            )
         )
 
+    # Train, val, test split
     train_paper = list(
-        filter(lambda x: (x["year"] <= args.split_year), candidate_paper)
+        filter(lambda x: train_range[0] <= x["year"] <= train_range[1], all_paper)
     )
-    test_paper = list(filter(lambda x: (x["year"] > args.split_year), candidate_paper))
+    val_paper = list(
+        filter(lambda x: val_range[0] <= x["year"] <= val_range[1], all_paper)
+    )
+    test_paper = list(
+        filter(lambda x: test_range[0] <= x["year"] <= test_range[1], all_paper)
+    )
 
-    with open(f"./{dataset_name}_train_test_dataset.json", "w") as f:
+    logger.info(f"Num of training paper: {len(train_paper)}")
+    logger.info(f"Num of validation paper: {len(val_paper)}")
+    logger.info(f"Num of testing paper: {len(test_paper)}")
+
+    with open(f"{args.save_dir}/{dataset_name}_train_test_dataset1.json", "w") as f:
         json.dump(
-            {
+            {   
+                "name": dataset_name,
                 "train": train_paper,
+                "valid": val_paper,
                 "test": test_paper,
             },
             f,

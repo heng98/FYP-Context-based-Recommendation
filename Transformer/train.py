@@ -12,11 +12,9 @@ from model.triplet_loss import TripletLoss
 from data.dataset import TripletDataset, TripletCollator
 from utils import distributed
 
-import json
 import os
 from tqdm import tqdm
 import argparse
-import random
 import logging
 import pickle
 
@@ -107,11 +105,8 @@ if __name__ == "__main__":
     parser.add_argument("--accumulate_step_size", type=int, default=4)
     parser.add_argument("--batch_size", type=int, default=8)
 
-    parser.add_argument("--samples_per_query", type=int, default=5)
-    parser.add_argument("--ratio_hard_neg", type=float, default=0.5)
-    parser.add_argument("--seed", type=int, default=42)
-
     parser.add_argument("--experiment_name", type=str, required=True)
+    parser.add_argument("--triplet_dataset_path", type=str, required=True)
 
     config = parser.parse_args()
     distributed.init_distributed_mode(config)
@@ -121,8 +116,6 @@ if __name__ == "__main__":
     model = EmbeddingModel(config).to(device)
     criterion = TripletLoss("l2_norm")
 
-    random.seed(config.seed)
-
     if not os.path.exists(f"weights/{config.experiment_name}"):
         os.makedirs(f"weights/{config.experiment_name}")
 
@@ -130,14 +123,14 @@ if __name__ == "__main__":
         model = nn.parallel.DistributedDataParallel(model, device_ids=[config.gpu])
         config.batch_size //= config.world_size
 
-    with open("dblp_triplet.pkl", "rb") as f:
+    with open(config.triplet_dataset_path, "rb") as f:
         unpickled_data = pickle.load(f)
 
     train_triplet_dataset = TripletDataset(
         unpickled_data["train"], unpickled_data["dataset"]
     )
     test_triplet_dataset = TripletDataset(
-        unpickled_data["test"], unpickled_data["dataset"]
+        unpickled_data["val"], unpickled_data["dataset"]
     )
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(config.model_name)

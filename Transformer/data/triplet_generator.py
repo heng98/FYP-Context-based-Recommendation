@@ -3,8 +3,7 @@ from typing import List, Tuple, Dict, Optional, Iterator, Set, Any
 import math
 import random
 from tqdm import tqdm
-
-from multiprocessing import Pool
+import argparse
 
 
 class TripletGenerator:
@@ -122,21 +121,26 @@ if __name__ == "__main__":
     import json
     from multiprocessing_generator import ParallelGenerator
 
-    with open("AAN_train_test_dataset.json", "r") as f:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--train_test_dataset", type=str, required=True)
+    config = parser.parse_args()
+
+    with open(config.train_test_dataset, "r") as f:
         data_json = json.load(f)
+        dataset_name = data_json["name"]
         train_dataset = data_json["train"]
-        test_dataset = data_json["test"]
+        val_dataset = data_json["val"]
 
     all_query_paper_ids_idx_mapping = {
-        data["ids"]: i for i, data in enumerate(train_dataset + test_dataset)
+        data["ids"]: i for i, data in enumerate(train_dataset + val_dataset)
     }
     train_paper_ids_idx_mapping = {
         data["ids"]: i for i, data in enumerate(train_dataset)
     }
-    test_paper_ids_idx_mapping = {data["ids"]: i for i, data in enumerate(test_dataset)}
+    val_paper_ids_idx_mapping = {data["ids"]: i for i, data in enumerate(val_dataset)}
 
-    train_candidate = {p["ids"] for p in train_dataset}
-    test_candidate = set(all_query_paper_ids_idx_mapping.keys())
+    train_candidate = set(train_paper_ids_idx_mapping.keys())
+    val_candidate = set(all_query_paper_ids_idx_mapping.keys())
 
     train_triplet_generator = TripletGenerator(
         train_paper_ids_idx_mapping,
@@ -145,10 +149,10 @@ if __name__ == "__main__":
         5,
     )
 
-    test_triplet_generator = TripletGenerator(
-        test_paper_ids_idx_mapping,
-        test_candidate,
-        test_dataset,
+    val_triplet_generator = TripletGenerator(
+        val_paper_ids_idx_mapping,
+        val_candidate,
+        val_dataset,
         5,
     )
 
@@ -160,9 +164,9 @@ if __name__ == "__main__":
         train_triplet_with_ids = list(tqdm(g))
 
     with ParallelGenerator(
-        test_triplet_generator.generate_triplets(), max_lookahead=100
+        val_triplet_generator.generate_triplets(), max_lookahead=100
     ) as g:
-        test_triplet_with_ids = list(tqdm(g))
+        val_triplet_with_ids = list(tqdm(g))
 
     train_triplet = [
         (
@@ -173,21 +177,21 @@ if __name__ == "__main__":
         for q, p, n in train_triplet_with_ids
     ]
 
-    test_triplet = [
+    val_triplet = [
         (
             all_query_paper_ids_idx_mapping[q],
             all_query_paper_ids_idx_mapping[p],
             all_query_paper_ids_idx_mapping[n],
         )
-        for q, p, n in test_triplet_with_ids
+        for q, p, n in val_triplet_with_ids
     ]
 
     with open("aan_triplet.pkl", "wb") as f:
         pickle.dump(
             {
-                "dataset": train_dataset + test_dataset,
+                "dataset": train_dataset + val_dataset,
                 "train": list(set(train_triplet)),
-                "test": list(set(test_triplet)),
+                "val": list(set(val_triplet)),
             },
             f,
         )
