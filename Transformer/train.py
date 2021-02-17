@@ -48,7 +48,7 @@ def train_one_epoch(
 
         if (i + 1) % 50 == 0:
             if config.distributed:
-                loss_recorded = distributed.reduce_mean(loss)
+                loss_recorded = distributed.reduce_mean(loss * 4)
             else:
                 loss_recorded = loss.detach().clone()
 
@@ -119,7 +119,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = EmbeddingModel(config).to(device)
-    criterion = TripletLoss()
+    criterion = TripletLoss("l2_norm")
 
     random.seed(config.seed)
 
@@ -169,10 +169,11 @@ if __name__ == "__main__":
     )
 
     optimizer = optim.Adam(model.parameters(), lr=config.lr)
+    num_update_steps = len(train_triplet_dataloader) * config.epochs // config.accumulate_step_size
     scheduler = transformers.get_linear_schedule_with_warmup(
         optimizer,
-        len(train_triplet_dataloader),
-        len(train_triplet_dataloader) * config.epochs,
+        num_update_steps * 0.1,
+        num_update_steps,
     )
 
     if distributed.is_main_process():

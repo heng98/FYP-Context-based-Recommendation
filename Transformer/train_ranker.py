@@ -26,7 +26,7 @@ logger.setLevel(logging.INFO)
 
 
 def train_one_epoch(
-    model, train_dataloader, criterion, optimizer, scheduler, epoch, writer, config, device
+    model, train_dataloader, criterion, optimizer, scheduler, epoch, writer, device
 ):
     logger.info(f"===Training epoch {epoch}===")
     model.train()
@@ -35,7 +35,7 @@ def train_one_epoch(
     ):
         q = q.to(device)
         c = c.to(device)
-        label = label.to(device)
+        label = label.float().unsqueeze(1).to(device)
 
         output = model(q, c)
         loss = criterion(output, label)
@@ -51,24 +51,33 @@ def train_one_epoch(
 
 
 @torch.no_grad()
-def eval(model, eval_dataloader, criterion, epoch, writer, config):
+def eval(model, eval_dataloader, criterion, epoch, writer, device):
     model.eval()
-
     loss_list = []
+    num_correct = 0
     for i, (q, c, label) in enumerate(tqdm(eval_dataloader), epoch):
         q = q.to(device)
         c = c.to(device)
-        label = label.to(device)
+        label = label.float().unsqueeze(1).to(device)
 
         output = model(q, c)
         loss = criterion(output, label)
+
+        output = output.sigmoid()
+        prediction = (output > 0.5).float()
+        num_correct += torch.sum(prediction == label).item()
 
         if i % 50 == 0:
             loss_list.append(loss.item())
 
     epoch_loss = torch.tensor(loss_list, dtype=torch.float).mean()
+    acc = num_correct / len(eval_dataloader.dataset)
 
     writer.add_scalar("val_ranker/loss", epoch_loss, epoch)
+    writer.add_scalar("val_ranker/acc", acc, epoch)
+
+def to_device_dict(d, device):
+    return {k: v.to(device) for k, v in d.items()}
 
 
 if __name__ == "__main__":
@@ -78,14 +87,12 @@ if __name__ == "__main__":
         "--model_name", type=str, default="allenai/scibert_scivocab_cased"
     )
     parser.add_argument("--lr", type=float, default=2e-5)
-    parser.add_argument("--accumulate_step_size", type=int, default=4)
     parser.add_argument("--batch_size", type=int, default=8)
 
-    parser.add_argument("--samples_per_query", type=int, default=5)
-    parser.add_argument("--ratio_hard_neg", type=float, default=0.5)
     parser.add_argument("--seed", type=int, default=42)
 
     parser.add_argument("--experiment_name", type=str, required=True)
+    parser.add_argument("--reload_epoch", type=int, required=True)
 
     config = parser.parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -100,24 +107,36 @@ if __name__ == "__main__":
     with open("dblp_triplet.pkl", "rb") as f:
         unpickled_data = pickle.load(f)
 
-    tokenizer = transformers.AutoTokenizer.from_pretrained(config.model_name)
-    embedding_model = EmbeddingModel(config)
-    state_dict = torch.load(config.weight_path, map_location="cuda:0")["state_dict"]
-    embedding_model.load_state_dict(state_dict)
+    # tokenizer = transformers.AutoTokenizer.from_pretrained(config.model_name)
+    # embedding_model = EmbeddingModel(config)
+    # state_dict = torch.load(
+    #     f"weights/{config.experiment_name}/weights_{config.reload_epoch}.pth", 
+    #     map_location="cuda:0"
+    # )["state_dict"]
 
-    embedding = torch.empty((len(unpickled_data["dataset"]), 768), dtype=torch.float)
-    with torch.no_grad():
-        for i, data in enumerate(unpickled_data["dataset"]):
-            encoded = tokenizer(
-                data["title"],
-                data["abstract"],
-                padding="max_length",
-                max_length=512,
-                truncation=True,
-                return_tensors="pt",
-            )
-            tmp_embedding = embedding_model(encoded)
-            embedding[i] = tmp_embedding.cpu()
+    # embedding_model.load_state_dict(state_dict)
+    # embedding_model.to(device)
+
+    # embedding = torch.empty((len(unpickled_data["dataset"]), 768), dtype=torch.float)
+    # with torch.no_grad():
+    #     for i, data in enumerate(tqdm(unpickled_data["dataset"])):
+    #         encoded = tokenizer(
+    #             data["title"],
+    #             data["abstract"],
+    #             padding="max_length",
+    #             max_length=512,
+    #             truncation=True,
+    #             return_tensors="pt",
+    #         )
+    #         encoded = to_device_dict(encoded, device)
+    #         tmp_embedding = embedding_model(encoded)
+    #         embedding[i] = tmp_embedding.cpu()
+
+    # del embedding_model
+    # torch.cuda.empty_cache()
+
+    # torch.save(embedding, "all_embedding_dblp.pth")
+    embedding = torch.load("all_embedding_dblp.pth")
 
     train_query_pair_dataset = QueryPairDataset(unpickled_data["train"], embedding)
     test_query_pair_dataset = QueryPairDataset(unpickled_data["test"], embedding)
@@ -127,6 +146,7 @@ if __name__ == "__main__":
         batch_size=config.batch_size,
         num_workers=2,
         pin_memory=True,
+        shuffle=True
     )
     test_query_pair_dataloader = DataLoader(
         test_query_pair_dataset,
@@ -153,11 +173,11 @@ if __name__ == "__main__":
             scheduler,
             epoch,
             writer,
-            config,
+            device
         )
-        eval(model, test_query_pair_dataloader, criterion, epoch, writer, config)
+        eval(model, test_query_pair_dataloader, criterion, epoch, writer, device)
 
         torch.save(
-            {"state_dict": model.module.state_dict()},
+            {"state_dict": model.state_dict()},
             f"weights/{config.experiment_name}/reranker_weights_{epoch}.pth",
         )

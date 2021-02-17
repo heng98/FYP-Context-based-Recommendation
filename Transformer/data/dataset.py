@@ -71,21 +71,6 @@ class QueryPairDataset(Dataset):
         return len(self.query_pairs)
 
 
-class QueryPairCollater:
-    def __init__(self, embedding):
-        self.embedding = embedding
-
-    def __call__(self, batch):
-        query_idx = [data[0] for data in batch]
-        candidate_idx = [data[1] for data in batch]
-        labels = [data[2] for data in batch]
-
-        query_embedding = self.embedding[query_idx]
-        candidate_embedding = self.embedding[candidate_idx]
-        labels = torch.tensor(labels, dtype=torch.float)
-
-        return query_embedding, candidate_embedding, labels
-
 class TripletDataset(Dataset):
     def __init__(
         self,

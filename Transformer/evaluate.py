@@ -4,6 +4,7 @@ from sklearn.metrics import ndcg_score
 
 from torch.utils.data import DataLoader
 from model.embedding_model import EmbeddingModel
+from model.reranker_model import SimpleReranker
 from data.dataset import PaperPosDataset
 from candidate_selector.ann.ann_annoy import ANNAnnoy
 from candidate_selector.ann.ann_candidate_selector import ANNCandidateSelector
@@ -12,7 +13,7 @@ import argparse
 import json
 from tqdm import tqdm
 import logging
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoModel
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -69,14 +70,25 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_name", type=str, default="allenai/scibert_scivocab_cased"
     )
+    parser.add_argument("--embedding_path", type=str)
     parser.add_argument("--weight_path", type=str, required=True)
+    parser.add_argument("--reranker_weight_path", type=str, required=True)
     config = parser.parse_args()
 
     model = EmbeddingModel(config)
     state_dict = torch.load(config.weight_path, map_location="cuda:1")["state_dict"]
+    model.load_state_dict(state_dict)
+    # model = AutoModel.from_pretrained(
+    #     config.model_name, add_pooling_layer=False, return_dict=True
+    # )
+
+    reranker = SimpleReranker()
+    reranker_state_dict = torch.load(config.reranker_weight_path)["state_dict"]
+    reranker.load_state_dict(reranker_state_dict)
 
     device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
+    reranker = reranker.to(device)
     
     tokenizer = AutoTokenizer.from_pretrained(config.model_name)
     with open("dblp_train_test_dataset.json", "r") as f:
@@ -100,19 +112,24 @@ if __name__ == "__main__":
 
     model.eval()
     with torch.no_grad():
-        doc_embedding_vectors = torch.empty(len(train_paper_pos_dataset), 768)
-        for i, (encoded, _) in enumerate(tqdm(train_paper_pos_dataset)):
-            encoded = to_device_dict(encoded, device)
-    
-            query_embedding = model(encoded)
-            doc_embedding_vectors[i] = query_embedding
+        if config.embedding_path:
+            logger.info("Load from embedding")
+            doc_embedding_vectors = torch.load(config.embedding_path)
+        else:
+            doc_embedding_vectors = torch.empty(len(train_paper_pos_dataset), 768)
+            for i, (encoded, _) in enumerate(tqdm(train_paper_pos_dataset)):
+                encoded = to_device_dict(encoded, device)
+        
+                query_embedding = model(encoded)
+                doc_embedding_vectors[i] = query_embedding
 
-        torch.save(doc_embedding_vectors, "embedding.pth")
+            torch.save(doc_embedding_vectors, "embedding_dblp.pth")
+
         doc_embedding_vectors = doc_embedding_vectors.cpu().numpy()
         logger.info("Building Annoy Index")
         ann = ANNAnnoy.build_graph(doc_embedding_vectors)
         ann_candidate_selector = ANNCandidateSelector(
-            ann, 5, train_paper_pos_dataset, train_idx_paper_idx_mapping
+            ann, 10, train_paper_pos_dataset, train_idx_paper_idx_mapping
         )
         mrr_list = []
         p_list = []
@@ -128,12 +145,31 @@ if __name__ == "__main__":
                 continue
 
             query = to_device_dict(query, device)
-            query_embedding = model(query).cpu().numpy()[0]
-            
-            # Check if top_k is sorted or not
-            candidates = ann_candidate_selector.get_candidate(query_embedding)
+            query_embedding = model(query)
+            query_embedding_numpy = query_embedding.clone().cpu().numpy()[0]
 
-            mrr_score, precision, recall, f1, ndcg_value = eval_score(candidates, positive, k=10)
+            # Check if top_k is sorted or not
+            candidates = ann_candidate_selector.get_candidate(query_embedding_numpy)
+            print(candidates)
+            mrr_score, precision, recall, f1, ndcg_value = eval_score(candidates, positive, k=20)
+            logger.info(f"MRR: {mrr_score}, P@5: {precision}, R@5: {recall}, f1@5: {f1}")
+            candidates_ids = [c[0] for c in candidates]
+
+            candidates_vector = torch.from_numpy(
+                doc_embedding_vectors[candidates_ids]
+            ).to(device)
+            output = reranker(
+                query_embedding.expand(len(candidates_ids), -1),
+                candidates_vector
+            ).sigmoid()
+            
+            # print(output)
+            similarity = output.tolist()
+            candidates = [(ids, sim) for ids, sim in zip(candidates_ids, similarity)]
+            print(candidates)
+            candidates = sorted(candidates, key=lambda x: x[1], reverse=True)
+
+            mrr_score, precision, recall, f1, ndcg_value = eval_score(candidates, positive, k=20)
 
             logger.info(f"MRR: {mrr_score}, P@5: {precision}, R@5: {recall}, f1@5: {f1}")
             mrr_list.append(mrr_score)
@@ -141,6 +177,9 @@ if __name__ == "__main__":
             r_list.append(recall)
             f1_list.append(f1)
             ndcg_list.append(ndcg_value)
+
+            if i > 10:
+                break
 
         logger.info(f"Skipped: {skipped}")
 
