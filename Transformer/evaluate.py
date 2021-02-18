@@ -8,6 +8,7 @@ from model.reranker_model import SimpleReranker
 from data.dataset import PaperPosDataset
 from candidate_selector.ann.ann_annoy import ANNAnnoy
 from candidate_selector.ann.ann_candidate_selector import ANNCandidateSelector
+from ranker import Ranker
 
 import argparse
 import json
@@ -72,23 +73,23 @@ if __name__ == "__main__":
     )
     parser.add_argument("--embedding_path", type=str)
     parser.add_argument("--weight_path", type=str, required=True)
-    parser.add_argument("--reranker_weight_path", type=str, required=True)
+
+
+    parser.add_argument("--reranker_weight_path", type=str)
     config = parser.parse_args()
 
     model = EmbeddingModel(config)
     state_dict = torch.load(config.weight_path, map_location="cuda:1")["state_dict"]
     model.load_state_dict(state_dict)
-    # model = AutoModel.from_pretrained(
-    #     config.model_name, add_pooling_layer=False, return_dict=True
-    # )
 
-    reranker = SimpleReranker()
-    reranker_state_dict = torch.load(config.reranker_weight_path)["state_dict"]
-    reranker.load_state_dict(reranker_state_dict)
+    if config.reranker_weight_path:
+        reranker_model = SimpleReranker()
+        reranker_state_dict = torch.load(config.reranker_weight_path)["state_dict"]
+        reranker_model.load_state_dict(reranker_state_dict)
 
     device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
-    reranker = reranker.to(device)
+    reranker_model = reranker_model.to(device)
     
     tokenizer = AutoTokenizer.from_pretrained(config.model_name)
     with open("dblp_train_test_dataset.json", "r") as f:
@@ -106,9 +107,6 @@ if __name__ == "__main__":
         train_idx_paper_idx_mapping,
         tokenizer
     )
-
-    # train_dataloader = DataLoader(train_paper_pos_dataset, num_workers=8)
-    # test_dataloader = DataLoader(test_paper_pos_dataset, num_workers=8)
 
     model.eval()
     with torch.no_grad():
@@ -131,6 +129,9 @@ if __name__ == "__main__":
         ann_candidate_selector = ANNCandidateSelector(
             ann, 10, train_paper_pos_dataset, train_idx_paper_idx_mapping
         )
+        if config.reranker_weight_path:
+            ranker = Ranker(reranker_model, doc_embedding_vectors, device)
+
         mrr_list = []
         p_list = []
         r_list = []
@@ -140,7 +141,7 @@ if __name__ == "__main__":
         logger.info("Evaluating")
         skipped = 0
         for i, (query, positive) in enumerate(tqdm(test_paper_pos_dataset)):
-            if len(positive) < 1:
+            if len(positive) < 10:
                 skipped += 1
                 continue
 
@@ -148,26 +149,10 @@ if __name__ == "__main__":
             query_embedding = model(query)
             query_embedding_numpy = query_embedding.clone().cpu().numpy()[0]
 
-            # Check if top_k is sorted or not
             candidates = ann_candidate_selector.get_candidate(query_embedding_numpy)
-            print(candidates)
-            mrr_score, precision, recall, f1, ndcg_value = eval_score(candidates, positive, k=20)
-            logger.info(f"MRR: {mrr_score}, P@5: {precision}, R@5: {recall}, f1@5: {f1}")
-            candidates_ids = [c[0] for c in candidates]
-
-            candidates_vector = torch.from_numpy(
-                doc_embedding_vectors[candidates_ids]
-            ).to(device)
-            output = reranker(
-                query_embedding.expand(len(candidates_ids), -1),
-                candidates_vector
-            ).sigmoid()
-            
-            # print(output)
-            similarity = output.tolist()
-            candidates = [(ids, sim) for ids, sim in zip(candidates_ids, similarity)]
-            print(candidates)
-            candidates = sorted(candidates, key=lambda x: x[1], reverse=True)
+           
+            if config.reranker_weight_path:
+                candidates = ranker.rank(query_embedding, candidates)
 
             mrr_score, precision, recall, f1, ndcg_value = eval_score(candidates, positive, k=20)
 
@@ -177,9 +162,6 @@ if __name__ == "__main__":
             r_list.append(recall)
             f1_list.append(f1)
             ndcg_list.append(ndcg_value)
-
-            if i > 10:
-                break
 
         logger.info(f"Skipped: {skipped}")
 
