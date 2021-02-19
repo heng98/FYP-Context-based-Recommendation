@@ -8,7 +8,7 @@ class ANNAnnoy:
     @classmethod
     def build_graph(cls, doc_embedding_vectors, ann_trees=100):
         embedding_dim = doc_embedding_vectors.shape[1]
-        index = AnnoyIndex(embedding_dim, 'angular')
+        index = AnnoyIndex(embedding_dim, 'euclidean')
 
         for i, doc_embedding in enumerate(doc_embedding_vectors):
             index.add_item(i, doc_embedding)

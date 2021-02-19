@@ -4,7 +4,11 @@ import math
 import random
 from tqdm import tqdm
 import argparse
+import logging
 
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger()
 
 class TripletGenerator:
     def __init__(
@@ -129,7 +133,7 @@ if __name__ == "__main__":
         data_json = json.load(f)
         dataset_name = data_json["name"]
         train_dataset = data_json["train"]
-        val_dataset = data_json["val"]
+        val_dataset = data_json["valid"]
 
     all_query_paper_ids_idx_mapping = {
         data["ids"]: i for i, data in enumerate(train_dataset + val_dataset)
@@ -146,14 +150,14 @@ if __name__ == "__main__":
         train_paper_ids_idx_mapping,
         train_candidate,
         train_dataset,
-        5,
+        10,
     )
 
     val_triplet_generator = TripletGenerator(
         val_paper_ids_idx_mapping,
         val_candidate,
         val_dataset,
-        5,
+        10,
     )
 
     with ParallelGenerator(
@@ -186,12 +190,18 @@ if __name__ == "__main__":
         for q, p, n in val_triplet_with_ids
     ]
 
-    with open("aan_triplet.pkl", "wb") as f:
+    train_triplet = list(set(train_triplet))
+    val_triplet = list(set(val_triplet))
+
+    logger.info(f"No of train triplet: {len(train_triplet)}")
+    logger.info(f"No of validation triplet: {len(val_triplet)}")
+
+    with open(f"{dataset_name}_10_triplet.pkl", "wb") as f:
         pickle.dump(
             {
                 "dataset": train_dataset + val_dataset,
-                "train": list(set(train_triplet)),
-                "val": list(set(val_triplet)),
+                "train": train_triplet,
+                "valid": val_triplet,
             },
             f,
         )

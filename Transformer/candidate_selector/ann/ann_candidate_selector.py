@@ -27,17 +27,17 @@ class ANNCandidateSelector:
         similarity = self._get_similarity(query_embedding, candidate)
 
         result = [(ids, sim) for ids, sim in zip(candidate, similarity)]
-        result = sorted(result, key=lambda x: x[1], reverse=True)
+        result = sorted(result, key=lambda x: x[1])
 
         return result
 
     def _get_similarity(self, query_embedding, candidate_list):
         candidate_vector = np.array(self.ann.get_items_vector(candidate_list))
 
-        sim = np.dot(candidate_vector, query_embedding) / (
-            np.linalg.norm(candidate_vector, 2, axis=1)
-            * np.linalg.norm(query_embedding, 2)
-        )
-        # sim = np.linalg.norm(candidate_vector - query_embedding, 2, axis=1)
+        # sim = np.dot(candidate_vector, query_embedding) / (
+        #     np.linalg.norm(candidate_vector, 2, axis=1)
+        #     * np.linalg.norm(query_embedding, 2)
+        # )
+        sim = np.linalg.norm(candidate_vector - query_embedding, 2, axis=1)
 
         return sim.tolist()

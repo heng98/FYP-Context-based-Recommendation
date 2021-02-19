@@ -41,13 +41,14 @@ def train_one_epoch(
         positive_embedding = model(p)
         negative_embedding = model(n)
 
-        loss = (
-            criterion(query_embedding, positive_embedding, negative_embedding)
-            / config.accumulate_step_size
-        )
+
+        loss = criterion(query_embedding, positive_embedding, negative_embedding)
+        if config.accumulate_step_size > 1:
+            loss = loss / config.accumulate_step_size
+
         loss.backward()
 
-        if (i + 1) % 50 == 0:
+        if (i + 1) % 10 == 0:
             if config.distributed:
                 loss_recorded = distributed.reduce_mean(
                     loss * config.accumulate_step_size
@@ -56,7 +57,7 @@ def train_one_epoch(
                 loss_recorded = loss.detach().clone()
 
             if writer:
-                writer.add_scalar("train/loss", loss_recorded.item(), i)
+                writer.add_scalar("embedding/train/loss", loss_recorded.item(), i)
 
         if (i + 1) % config.accumulate_step_size == 0:
             optimizer.step()
@@ -82,18 +83,17 @@ def eval(model, eval_dataloader, criterion, epoch, writer, config):
 
         loss = criterion(query_embedding, positive_embedding, negative_embedding)
 
-        if i % 50 == 0:
-            if config.distributed:
-                loss_recorded = distributed.reduce_mean(loss)
-            else:
-                loss_recorded = loss
+        if config.distributed:
+            loss_recorded = distributed.reduce_mean(loss)
+        else:
+            loss_recorded = loss
 
-            loss_list.append(loss_recorded.item())
+        loss_list.append(loss_recorded.item())
 
     epoch_loss = torch.tensor(loss_list, dtype=torch.float).mean()
 
     if writer:
-        writer.add_scalar("val/loss", epoch_loss, epoch)
+        writer.add_scalar("embedding/val/loss", epoch_loss, epoch)
 
 
 def to_device_dict(d, device):
@@ -136,7 +136,7 @@ if __name__ == "__main__":
         unpickled_data["train"], unpickled_data["dataset"]
     )
     test_triplet_dataset = TripletDataset(
-        unpickled_data["val"], unpickled_data["dataset"]
+        unpickled_data["valid"], unpickled_data["dataset"]
     )
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(config.model_name)

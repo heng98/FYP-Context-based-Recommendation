@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-class SimpleReranker:
+class SimpleReranker(nn.Module):
     def __init__(self):
         super(SimpleReranker, self).__init__()
         self.linear_1 = nn.Linear(768, 300)

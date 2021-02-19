@@ -19,8 +19,8 @@ class TripletLoss(nn.Module):
         Args:
             distance: the name of the distance function used: cosine | l2_norm
         """
-        sel.distance = distance
-        if distance != "cosine" or distance != "l2_norm":
+        self.distance = distance
+        if distance != "cosine" and distance != "l2_norm":
             raise NotImplementedError(
                 f"Distance function [{distance}] is not recognize"
             )
