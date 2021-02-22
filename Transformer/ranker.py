@@ -19,7 +19,6 @@ class Ranker:
             self.reranker_model(
                 query_embedding.expand(len(candidates_ids), -1), candidates_vector
             )
-            .sigmoid()
             .tolist()
         )
 

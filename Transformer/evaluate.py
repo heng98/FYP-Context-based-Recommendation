@@ -91,6 +91,7 @@ if __name__ == "__main__":
         reranker_state_dict = torch.load(config.reranker_weight_path)["state_dict"]
         reranker_model.load_state_dict(reranker_state_dict)
         reranker_model = reranker_model.to(device)
+        reranker_model.eval()
     
     tokenizer = AutoTokenizer.from_pretrained(config.model_name)
     with open("DBLP_train_test_dataset_1.json", "r") as f:
