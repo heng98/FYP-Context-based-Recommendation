@@ -140,9 +140,18 @@ if __name__ == "__main__":
         json.dump(
             {   
                 "name": dataset_name,
-                "train": train_paper,
-                "valid": val_paper,
-                "test": test_paper,
+                "train": {
+                    data["ids"]: data
+                    for data in train_paper
+                },
+                "valid": {
+                    data["ids"]: data
+                    for data in val_paper
+                },
+                "test": {
+                    data["ids"]: data
+                    for data in test_paper
+                }
             },
             f,
             indent=2,

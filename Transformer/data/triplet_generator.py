@@ -1,6 +1,8 @@
-from typing import List, Tuple, Dict, Optional, Iterator, Set, Any
+from typing import List, Tuple, Dict, Iterator, Set, Any
 
 import math
+import numpy as np
+from sklearn.metrics import pairwise_distances
 import random
 from tqdm import tqdm
 import argparse
@@ -10,21 +12,26 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 
+
 class TripletGenerator:
     def __init__(
         self,
-        query_paper_ids_idx_mapping: Dict[str, int],
+        dataset: Dict[str, Dict[str, Any]],
+        query_papers_ids: Set[str],
         candidate_papers_ids: Set[str],
-        dataset: List[Dict[str, Any]],
-        samples_per_query: int,
-        ratio_hard_neg: Optional[float] = 0.5,
+        config,
     ):
-        self.query_paper_ids_idx_mapping = query_paper_ids_idx_mapping
-        self.candidate_papers_ids = candidate_papers_ids
         self.dataset = dataset
+        self.query_paper_ids = query_papers_ids
+        self.candidate_papers_ids = candidate_papers_ids
 
-        self.samples_per_query = samples_per_query
-        self.ratio_hard_neg = ratio_hard_neg
+        self.samples_per_query = config.samples_per_query
+        self.ratio_hard_neg = config.ratio_hard_neg
+        self.ratio_nn_neg = config.ratio_nn_neg
+
+        self.nn_neg_flag = False
+
+        assert self.ratio_hard_neg + self.ratio_nn_neg <= 1
 
     def _get_easy_neg(
         self, query_id: str, n_easy_samples: int
@@ -36,10 +43,10 @@ class TripletGenerator:
             query_id: number specifying index of query paper
             n_easy_samples: number of easy samples to output
         """
-        query_idx = self.query_paper_ids_idx_mapping[query_id]
         not_easy_neg_candidates = (
-            self.dataset[query_idx]["pos"]
-            + self.dataset[query_idx]["hard_neg"]
+            self.dataset[query_id]["pos"]
+            + self.dataset[query_id]["hard_neg"]
+            + self.dataset[query_id].get("nn_neg", [])
             + [query_id]
         )
         easy_neg_candidates = list(
@@ -48,7 +55,8 @@ class TripletGenerator:
 
         easy_samples = []
         pos_candidates = list(
-            set(self.dataset[query_idx]["pos"]) & self.candidate_papers_ids
+            (set(self.dataset[query_id]["pos"]) & self.candidate_papers_ids)
+            - {query_id}
         )
         if pos_candidates and easy_neg_candidates:
             for _ in range(n_easy_samples):
@@ -63,21 +71,21 @@ class TripletGenerator:
     ) -> List[Tuple[str, str, str]]:
         # if there aren't enough candidates to generate enough unique samples
         # reduce the number of samples to make it possible for them to be unique
-        query_idx = self.query_paper_ids_idx_mapping[query_id]
         n_hard_samples = min(
             n_hard_samples,
             len(
-                self.dataset[query_idx]["pos"]
-                * len(self.dataset[query_idx]["hard_neg"])
+                self.dataset[query_id]["pos"] * len(self.dataset[query_id]["hard_neg"])
             ),
         )
 
         hard_samples = []
         pos_candidates = list(
-            set(self.dataset[query_idx]["pos"]) & self.candidate_papers_ids
+            (set(self.dataset[query_id]["pos"]) & self.candidate_papers_ids)
+            - {query_id}
         )
         hard_neg_candidates = list(
-            self.candidate_papers_ids & set(self.dataset[query_idx]["hard_neg"])
+            (self.candidate_papers_ids & set(self.dataset[query_id]["hard_neg"]))
+            - {query_id}
         )
 
         if pos_candidates and hard_neg_candidates:
@@ -88,16 +96,66 @@ class TripletGenerator:
 
         return hard_samples
 
+    def update_nn_hard(self, doc_embedding, paper_ids_seq):
+        logger.info("Updating NN")
+        self.nn_neg_flag = True
+
+        distance = pairwise_distances(doc_embedding)
+        top_k = np.argpartition(distance, 10)[:10]
+
+        num_of_doc = doc_embedding.shape[0]
+        self_idx = np.array(range(num_of_doc)).reshape(num_of_doc, -1)
+
+        top_k = top_k[top_k != self_idx].reshape(num_of_doc, -1)
+
+        for paper_id, top_k_nn in zip(tqdm(paper_ids_seq), top_k):
+            nn_hard_candidate = [paper_ids_seq[i] for i in top_k_nn]
+            data = self.dataset[paper_id]
+            nn_hard = list(
+                set(nn_hard_candidate) - set(data["hard_neg"]) - set(data["pos"])
+            )
+            data["nn_neg"] = nn_hard
+
+    def _get_nn_neg(
+        self, query_id: str, n_hard_samples: int
+    ) -> List[Tuple[str, str, str]]:
+        n_hard_samples = min(
+            n_hard_samples,
+            len(self.dataset[query_id]["pos"] * len(self.dataset[query_id]["nn_neg"])),
+        )
+
+        nn_samples = []
+        pos_candidates = list(
+            set(self.dataset[query_id]["pos"]) & self.candidate_papers_ids
+        )
+        nn_neg_candidates = list(
+            self.candidate_papers_ids & set(self.dataset[query_id]["nn_neg"])
+        )
+
+        if pos_candidates and nn_neg_candidates:
+            for _ in range(n_hard_samples):
+                pos = random.choice(pos_candidates)
+                neg = random.choice(nn_neg_candidates)
+                nn_samples.append((query_id, pos, neg))
+
+        return nn_samples
+
     def _get_triplet(self, query_id: str) -> List[Tuple[str, str, str]]:
         n_hard_samples = math.ceil(self.ratio_hard_neg * self.samples_per_query)
-        n_easy_samples = self.samples_per_query - n_hard_samples
+
+        if self.nn_neg_flag:
+            n_nn_samples = math.ceil(self.ratio_nn_neg * self.samples_per_query)
+        else:
+            n_nn_samples = 0
+
+        n_easy_samples = self.samples_per_query - n_hard_samples - n_nn_samples
 
         hard_neg_samples = self._get_hard_neg(query_id, n_hard_samples)
         easy_neg_samples = self._get_easy_neg(query_id, n_easy_samples)
 
         return hard_neg_samples + easy_neg_samples
 
-    def generate_triplets(self) -> Iterator[Tuple[int, int, int]]:
+    def generate_triplets(self) -> Iterator[Tuple[str, str, str]]:
         """Generate triplets from the whole dataset
 
         This generates a list of triplets each query according to:
@@ -107,20 +165,19 @@ class TripletGenerator:
         skipped = 0
         success = 0
 
-        for data in tqdm(self.dataset):
-            if data["ids"] in self.query_paper_ids_idx_mapping:
-                results = self._get_triplet(data["ids"])
-                if len(results) > 2:
-                    for triplet in results:
-
-                        yield triplet
-                    success += 1
+        for query_paper_id in tqdm(self.query_paper_ids):
+            results = self._get_triplet(query_paper_id)
+            if len(results) > 2:
+                for triplet in results:
+                    yield triplet
+                success += 1
 
             else:
                 skipped += 1
 
 
 if __name__ == "__main__":
+    exit()
     import pickle
     import json
     from multiprocessing_generator import ParallelGenerator

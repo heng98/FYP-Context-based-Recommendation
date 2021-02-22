@@ -9,8 +9,9 @@ import transformers
 
 from model.embedding_model import EmbeddingModel
 from model.triplet_loss import TripletLoss
-from data.dataset import TripletDataset, TripletCollator
+from data.dataset import TripletDataset, TripletCollator, TripletIterableDataset
 from utils import distributed
+from utils.embed_documents import embed_documents
 
 import os
 from tqdm import tqdm
@@ -129,14 +130,25 @@ if __name__ == "__main__":
         model = nn.parallel.DistributedDataParallel(model, device_ids=[config.gpu])
         config.batch_size //= config.world_size
 
-    with open(config.triplet_dataset_path, "rb") as f:
-        unpickled_data = pickle.load(f)
+    with open("./DBLP_train_test_dataset_1.json", "r") as f:
+        data_json = json.load(f)
+        dataset_name = data_json["name"]
+        train_dataset = data_json["train"]
+        val_dataset = data_json["valid"]
 
-    train_triplet_dataset = TripletDataset(
-        unpickled_data["train"], unpickled_data["dataset"]
+    train_paper_ids = set(train_dataset.keys())
+    val_paper_ids = set(val_dataset.keys())
+    train_triplet_dataset = TripletIterableDataset(
+        train_dataset,
+        train_paper_ids,
+        train_paper_ids,
+        config
     )
     test_triplet_dataset = TripletDataset(
-        unpickled_data["valid"], unpickled_data["dataset"]
+        val_dataset,
+        val_paper_ids,
+        train_paper_ids + val_paper_ids,
+        config
     )
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(config.model_name)
