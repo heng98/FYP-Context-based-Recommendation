@@ -125,24 +125,28 @@ class TripletIterableDataset(IterableDataset):
     def __init__(
         self,
         dataset: Dict[str, Dict[str, Any]],
-        query_paper_ids: Set[str],
+        query_paper_ids: List[str],
         candidate_papers_ids: Set[str],
         config
     ):
         super().__init__()
         self.dataset = dataset
         self.query_paper_ids = query_paper_ids
-        self.candidate_paper_ids = candidate_papers_ids
-
-        self.triplet_generator = TripletGenerator(
-            dataset,
-            query_paper_ids,
-            candidate_papers_ids,
-            config
+        self.candidate_papers_ids = candidate_papers_ids
+        self.config = config
+ 
+    def _build_triplet_generator(self):
+        triplet_generator = TripletGenerator(
+            self.dataset,
+            self.query_paper_ids,
+            self.candidate_papers_ids,
+            self.config
         )
+        return triplet_generator
 
     def __iter__(self):
-        for triplet in self.triplet_generator.generate_triplets():
+        triplet_generator = self._build_triplet_generator()
+        for triplet in triplet_generator.generate_triplets():
             query_paper = self.dataset[triplet[0]]
             pos_paper = self.dataset[triplet[1]]
             neg_paper = self.dataset[triplet[2]]
@@ -183,9 +187,8 @@ class Config:
     ratio_nn_neg = 0.1
 
 
-
 if __name__ == "__main__":
-    from torch.utils.data import DataLoader
+    from torch.utils.data import DataLoader, get_worker_info
     import json
     import torch
 
@@ -195,26 +198,22 @@ if __name__ == "__main__":
         train_dataset = data_json["train"]
         val_dataset = data_json["valid"]
 
-    # for k, v in train_dataset.items():
-    #     if k in v["hard_neg"]:
-    #         print("cycle citation")
-
 
     config = Config()    
-    query_paper_ids = set(train_dataset.keys())
+    query_paper_ids = list(train_dataset.keys())
 
     dataset = TripletIterableDataset(
         train_dataset,
         query_paper_ids,
-        query_paper_ids,
+        set(query_paper_ids),
         config
     )
 
-    dataloader = DataLoader(dataset)
+    print(query_paper_ids[:4])
+    # dataloader = DataLoader(dataset, num_workers=4, worker_init_fn=worker_fn)
     # dataset.triplet_generator.update_nn_hard(torch.randn(len(train_dataset), 5), list(query_paper_ids))
     for i in dataloader:
-        a = [j["ids"][0] for j in i]
-        if len(set(a)) != 3:
-            print("something is duplicated")
-        # break
-        
+        continue
+        # print(i[0]["ids"])
+        # a = [j["ids"][0] for j in i]
+        # print(a)

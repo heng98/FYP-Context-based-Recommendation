@@ -17,12 +17,12 @@ class TripletGenerator:
     def __init__(
         self,
         dataset: Dict[str, Dict[str, Any]],
-        query_papers_ids: Set[str],
+        query_papers_ids: List[str],
         candidate_papers_ids: Set[str],
         config,
     ):
         self.dataset = dataset
-        self.query_paper_ids = query_papers_ids
+        self.query_papers_ids = query_papers_ids
         self.candidate_papers_ids = candidate_papers_ids
 
         self.samples_per_query = config.samples_per_query
@@ -165,7 +165,7 @@ class TripletGenerator:
         skipped = 0
         success = 0
 
-        for query_paper_id in tqdm(self.query_paper_ids):
+        for query_paper_id in tqdm(self.query_papers_ids):
             results = self._get_triplet(query_paper_id)
             if len(results) > 2:
                 for triplet in results:

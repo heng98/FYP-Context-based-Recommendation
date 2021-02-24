@@ -2,7 +2,12 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
-from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
+from torch.utils.data import (
+    DataLoader,
+    RandomSampler,
+    SequentialSampler,
+    get_worker_info,
+)
 from torch.utils.data.distributed import DistributedSampler
 
 import transformers
@@ -41,7 +46,6 @@ def train_one_epoch(
         query_embedding = model(q)
         positive_embedding = model(p)
         negative_embedding = model(n)
-
 
         loss = criterion(query_embedding, positive_embedding, negative_embedding)
         if config.accumulate_step_size > 1:
@@ -101,6 +105,17 @@ def to_device_dict(d, device):
     return {k: v.to(device) for k, v in d.items()}
 
 
+def worker_fn(worker_id):
+    worker_info = get_worker_info()
+    num_workers = worker_info.num_workers
+    dataset = worker_info.dataset
+    size = len(dataset.query_paper_ids) // num_workers + 1
+
+    dataset.query_paper_ids = dataset.query_paper_ids[
+        worker_id * size : (worker_id + 1) * size
+    ]
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--epochs", type=int, default=5)
@@ -139,16 +154,10 @@ if __name__ == "__main__":
     train_paper_ids = set(train_dataset.keys())
     val_paper_ids = set(val_dataset.keys())
     train_triplet_dataset = TripletIterableDataset(
-        train_dataset,
-        train_paper_ids,
-        train_paper_ids,
-        config
+        train_dataset, train_paper_ids, train_paper_ids, config
     )
     test_triplet_dataset = TripletDataset(
-        val_dataset,
-        val_paper_ids,
-        train_paper_ids + val_paper_ids,
-        config
+        val_dataset, val_paper_ids, train_paper_ids + val_paper_ids, config
     )
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(config.model_name)
@@ -181,7 +190,7 @@ if __name__ == "__main__":
 
     optimizer = optim.Adam(model.parameters(), lr=config.lr)
     num_update_steps = (
-        len(train_triplet_dataloader) * config.epochs // config.accumulate_step_size
+        len(train_dataset) * config.epochs * 10 // config.accumulate_step_size
     )
     scheduler = transformers.get_linear_schedule_with_warmup(
         optimizer,
