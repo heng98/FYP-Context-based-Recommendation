@@ -12,7 +12,6 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 
-
 class TripletGenerator:
     def __init__(
         self,
@@ -59,10 +58,10 @@ class TripletGenerator:
             - {query_id}
         )
         if pos_candidates and easy_neg_candidates:
-            for _ in range(n_easy_samples):
-                pos = random.choice(pos_candidates)
-                neg = random.choice(easy_neg_candidates)
-                easy_samples.append((query_id, pos, neg))
+            pos = random.choices(pos_candidates, k=n_easy_samples)
+            neg = random.choices(easy_neg_candidates, k=n_easy_samples)
+
+            easy_samples = [(query_id, p, n) for p, n in zip(pos, neg)]
 
         return easy_samples
 
@@ -89,10 +88,10 @@ class TripletGenerator:
         )
 
         if pos_candidates and hard_neg_candidates:
-            for _ in range(n_hard_samples):
-                pos = random.choice(pos_candidates)
-                neg = random.choice(hard_neg_candidates)
-                hard_samples.append((query_id, pos, neg))
+            pos = random.choices(pos_candidates, k=n_hard_samples)
+            neg = random.choices(hard_neg_candidates, k=n_hard_samples)
+
+            hard_samples = [(query_id, p, n) for p, n in zip(pos, neg)]
 
         return hard_samples
 
@@ -117,14 +116,14 @@ class TripletGenerator:
             data["nn_neg"] = nn_hard
 
     def _get_nn_neg(
-        self, query_id: str, n_hard_samples: int
+        self, query_id: str, n_nn_samples: int
     ) -> List[Tuple[str, str, str]]:
-        n_hard_samples = min(
-            n_hard_samples,
+        n_nn_samples = min(
+            n_nn_samples,
             len(self.dataset[query_id]["pos"] * len(self.dataset[query_id]["nn_neg"])),
         )
 
-        nn_samples = []
+        nn_neg_samples = []
         pos_candidates = list(
             set(self.dataset[query_id]["pos"]) & self.candidate_papers_ids
         )
@@ -133,12 +132,12 @@ class TripletGenerator:
         )
 
         if pos_candidates and nn_neg_candidates:
-            for _ in range(n_hard_samples):
-                pos = random.choice(pos_candidates)
-                neg = random.choice(nn_neg_candidates)
-                nn_samples.append((query_id, pos, neg))
+            pos = random.choices(pos_candidates, k=n_nn_samples)
+            neg = random.choices(nn_neg_candidates, k=n_nn_samples)
 
-        return nn_samples
+            nn_neg_samples = [(query_id, p, n) for p, n in zip(pos, neg)]
+
+        return nn_neg_samples
 
     def _get_triplet(self, query_id: str) -> List[Tuple[str, str, str]]:
         n_hard_samples = math.ceil(self.ratio_hard_neg * self.samples_per_query)
@@ -153,7 +152,12 @@ class TripletGenerator:
         hard_neg_samples = self._get_hard_neg(query_id, n_hard_samples)
         easy_neg_samples = self._get_easy_neg(query_id, n_easy_samples)
 
-        return hard_neg_samples + easy_neg_samples
+        if self.nn_neg_flag:
+            nn_neg_samples = self._get_nn_neg(query_id, n_nn_samples)
+        else:
+            nn_neg_samples = []
+
+        return hard_neg_samples + easy_neg_samples + nn_neg_samples
 
     def generate_triplets(self) -> Iterator[Tuple[str, str, str]]:
         """Generate triplets from the whole dataset
@@ -174,91 +178,3 @@ class TripletGenerator:
 
             else:
                 skipped += 1
-
-
-if __name__ == "__main__":
-    exit()
-    import pickle
-    import json
-    from multiprocessing_generator import ParallelGenerator
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--train_test_dataset", type=str, required=True)
-    config = parser.parse_args()
-
-    with open(config.train_test_dataset, "r") as f:
-        data_json = json.load(f)
-        dataset_name = data_json["name"]
-        train_dataset = data_json["train"]
-        val_dataset = data_json["valid"]
-
-    all_query_paper_ids_idx_mapping = {
-        data["ids"]: i for i, data in enumerate(train_dataset + val_dataset)
-    }
-    train_paper_ids_idx_mapping = {
-        data["ids"]: i for i, data in enumerate(train_dataset)
-    }
-    val_paper_ids_idx_mapping = {data["ids"]: i for i, data in enumerate(val_dataset)}
-
-    train_candidate = set(train_paper_ids_idx_mapping.keys())
-    val_candidate = set(all_query_paper_ids_idx_mapping.keys())
-
-    train_triplet_generator = TripletGenerator(
-        train_paper_ids_idx_mapping,
-        train_candidate,
-        train_dataset,
-        10,
-    )
-
-    val_triplet_generator = TripletGenerator(
-        val_paper_ids_idx_mapping,
-        val_candidate,
-        val_dataset,
-        10,
-    )
-
-    with ParallelGenerator(
-        train_triplet_generator.generate_triplets(),
-        max_lookahead=100,
-    ) as g:
-
-        train_triplet_with_ids = list(tqdm(g))
-
-    with ParallelGenerator(
-        val_triplet_generator.generate_triplets(), max_lookahead=100
-    ) as g:
-        val_triplet_with_ids = list(tqdm(g))
-
-    train_triplet = [
-        (
-            all_query_paper_ids_idx_mapping[q],
-            all_query_paper_ids_idx_mapping[p],
-            all_query_paper_ids_idx_mapping[n],
-        )
-        for q, p, n in train_triplet_with_ids
-    ]
-
-    val_triplet = [
-        (
-            all_query_paper_ids_idx_mapping[q],
-            all_query_paper_ids_idx_mapping[p],
-            all_query_paper_ids_idx_mapping[n],
-        )
-        for q, p, n in val_triplet_with_ids
-    ]
-
-    train_triplet = list(set(train_triplet))
-    val_triplet = list(set(val_triplet))
-
-    logger.info(f"No of train triplet: {len(train_triplet)}")
-    logger.info(f"No of validation triplet: {len(val_triplet)}")
-
-    with open(f"{dataset_name}_10_triplet.pkl", "wb") as f:
-        pickle.dump(
-            {
-                "dataset": train_dataset + val_dataset,
-                "train": train_triplet,
-                "valid": val_triplet,
-            },
-            f,
-        )
