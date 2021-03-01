@@ -96,17 +96,18 @@ if __name__ == "__main__":
     with open("DBLP_train_test_dataset_1.json", "r") as f:
         dataset = json.load(f)
 
-    train_idx_paper_idx_mapping = {data["ids"]: idx for idx, data in enumerate(dataset["train"])}
+    train_idx_paper_idx_mapping = {ids: idx for idx, ids in enumerate(dataset["train"].keys())}
     train_paper_pos_dataset = PaperPosDataset(
-        dataset["train"],
+        list(dataset["train"].values()),
         train_idx_paper_idx_mapping,
         tokenizer
     )
 
     test_paper_pos_dataset = PaperPosDataset(
-        dataset["test"],
+        list(dataset["test"].values()),
         train_idx_paper_idx_mapping,
-        tokenizer
+        tokenizer,
+        abstract=False
     )
 
     model.eval()

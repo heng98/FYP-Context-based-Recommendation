@@ -22,7 +22,7 @@ import os
 from tqdm import tqdm
 import argparse
 import logging
-import pickle
+import json
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,12 +30,12 @@ logger.setLevel(logging.INFO)
 
 
 def train_one_epoch(
-    model, train_dataloader, criterion, optimizer, scheduler, epoch, writer, config
+    model, train_dataloader, criterion, optimizer, scheduler, epoch, writer, config, last_step
 ):
     logger.info(f"===Training epoch {epoch}===")
     model.train()
-    for i, (q, p, n) in enumerate(
-        tqdm(train_dataloader), epoch * len(train_dataloader)  # Need check
+    for step, (q, p, n) in enumerate(
+        train_dataloader, last_step  # Need check
     ):
         q, p, n = (
             to_device_dict(q, device),
@@ -53,7 +53,7 @@ def train_one_epoch(
 
         loss.backward()
 
-        if (i + 1) % 10 == 0:
+        if (step + 1) % 10 == 0:
             if config.distributed:
                 loss_recorded = distributed.reduce_mean(
                     loss * config.accumulate_step_size
@@ -62,12 +62,14 @@ def train_one_epoch(
                 loss_recorded = loss.detach().clone()
 
             if writer:
-                writer.add_scalar("embedding/train/loss", loss_recorded.item(), i)
+                writer.add_scalar("embedding/train/loss", loss_recorded.item(), step)
 
-        if (i + 1) % config.accumulate_step_size == 0:
+        if (step + 1) % config.accumulate_step_size == 0:
             optimizer.step()
             optimizer.zero_grad()
             scheduler.step()
+
+    return step
 
 
 @torch.no_grad()
@@ -75,7 +77,7 @@ def eval(model, eval_dataloader, criterion, epoch, writer, config):
     model.eval()
 
     loss_list = []
-    for i, (q, p, n) in enumerate(tqdm(eval_dataloader), epoch):
+    for i, (q, p, n) in enumerate(eval_dataloader, epoch):
         q, p, n = (
             to_device_dict(q, device),
             to_device_dict(p, device),
@@ -128,7 +130,11 @@ if __name__ == "__main__":
     parser.add_argument("--max_seq_len", type=int, default=512)
 
     parser.add_argument("--experiment_name", type=str, required=True)
-    parser.add_argument("--triplet_dataset_path", type=str, required=True)
+
+    parser.add_argument("--samples_per_query", type=int, default=10)
+    parser.add_argument("--ratio_hard_neg", type=float, default=0.5)
+    parser.add_argument("--ratio_nn_neg", type=float, default=0.1)
+    # parser.add_argument("--triplet_dataset_path", type=str, required=True)
 
     config = parser.parse_args()
     distributed.init_distributed_mode(config)
@@ -151,46 +157,55 @@ if __name__ == "__main__":
         train_dataset = data_json["train"]
         val_dataset = data_json["valid"]
 
-    train_paper_ids = set(train_dataset.keys())
-    val_paper_ids = set(val_dataset.keys())
+    train_paper_ids = list(train_dataset.keys())
+    val_paper_ids = list(val_dataset.keys())
+
+    dataset = {**train_dataset, **val_dataset}
+
     train_triplet_dataset = TripletIterableDataset(
-        train_dataset, train_paper_ids, train_paper_ids, config
+        dataset,
+        train_paper_ids,
+        set(train_paper_ids),
+        config
     )
-    test_triplet_dataset = TripletDataset(
-        val_dataset, val_paper_ids, train_paper_ids + val_paper_ids, config
+    test_triplet_dataset = TripletIterableDataset(
+        dataset,
+        val_paper_ids,
+        set(train_paper_ids + val_paper_ids),
+        config
     )
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(config.model_name)
     collater = TripletCollator(tokenizer, config.max_seq_len)
 
-    if config.distributed:
-        train_triplet_sampler = DistributedSampler(train_triplet_dataset, shuffle=True)
-        test_triplet_sampler = DistributedSampler(test_triplet_dataset, shuffle=False)
-    else:
-        # Initialize this instead of using shuffle args in DataLoader
-        train_triplet_sampler = RandomSampler(train_triplet_dataset)
-        test_triplet_sampler = SequentialSampler(test_triplet_dataset)
+    # if config.distributed:
+    #     train_triplet_sampler = DistributedSampler(train_triplet_dataset, shuffle=True)
+    #     test_triplet_sampler = DistributedSampler(test_triplet_dataset, shuffle=False)
+    # else:
+    #     # Initialize this instead of using shuffle args in DataLoader
+    #     train_triplet_sampler = RandomSampler(train_triplet_dataset)
+    #     test_triplet_sampler = SequentialSampler(test_triplet_dataset)
 
     train_triplet_dataloader = DataLoader(
         train_triplet_dataset,
         batch_size=config.batch_size,
-        num_workers=2,
         pin_memory=True,
-        sampler=train_triplet_sampler,
         collate_fn=collater,
+        num_workers=8,
+        # worker_init_fn=worker_fn
     )
     test_triplet_dataloader = DataLoader(
         test_triplet_dataset,
         batch_size=config.batch_size,
-        num_workers=2,
         pin_memory=True,
-        sampler=test_triplet_sampler,
         collate_fn=collater,
+        num_workers=8,
+        # worker_init_fn=worker_fn
     )
 
     optimizer = optim.Adam(model.parameters(), lr=config.lr)
     num_update_steps = (
-        len(train_dataset) * config.epochs * 10 // config.accumulate_step_size
+        len(train_dataset) * config.epochs * config.samples_per_query // config.accumulate_step_size
     )
     scheduler = transformers.get_linear_schedule_with_warmup(
         optimizer,
@@ -203,10 +218,11 @@ if __name__ == "__main__":
     else:
         writer = None
 
+    last_step = 0
     for epoch in range(0, config.epochs):
-        if config.distributed:
-            train_triplet_sampler.set_epoch(epoch)
-        train_one_epoch(
+        # if config.distributed:
+        #     train_triplet_sampler.set_epoch(epoch)
+        last_step = train_one_epoch(
             model,
             train_triplet_dataloader,
             criterion,
@@ -215,11 +231,16 @@ if __name__ == "__main__":
             epoch,
             writer,
             config,
+            last_step
         )
         eval(model, test_triplet_dataloader, criterion, epoch, writer, config)
 
+        document_embedding = embed_documents(model, train_dataset, tokenizer, device)
+        paper_ids_seq = list(train_dataset.keys())
+        train_triplet_dataset.triplet_generator.update_nn_hard(document_embedding, paper_ids_seq)
+
         if distributed.is_main_process():
             torch.save(
-                {"state_dict": model.module.state_dict()},
+                {"state_dict": model.state_dict()},
                 f"weights/{config.experiment_name}/weights_{epoch}.pth",
             )

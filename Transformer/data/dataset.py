@@ -1,13 +1,13 @@
 import torch
-from torch.utils.data import Dataset, IterableDataset
+from torch.utils.data import Dataset, IterableDataset, get_worker_info
 from typing import Dict, List, Any, Set, Optional
 
-from triplet_generator import TripletGenerator
+from .triplet_generator import TripletGenerator
 
 
 class PaperPosDataset(Dataset):
     def __init__(
-        self, dataset: List[Dict[str, Any]], candidate_paper: Dict[str, int], tokenizer
+        self, dataset: List[Dict[str, Any]], candidate_paper: Dict[str, int], tokenizer, abstract=True
     ):
         super(PaperPosDataset, self).__init__()
         self.dataset = dataset
@@ -15,18 +15,29 @@ class PaperPosDataset(Dataset):
         self.candidate_paper_set = set(candidate_paper)
         self.tokenizer = tokenizer
 
+        self.abstract = abstract
+
         self.cache = {}
 
     def __getitem__(self, index: int):
         data = self.dataset[index]
-        encoded = self.tokenizer(
-            data["title"],
-            data["abstract"],
-            padding="max_length",
-            max_length=256,
-            truncation=True,
-            return_tensors="pt",
-        )
+        if self.abstract:
+            encoded = self.tokenizer(
+                data["title"],
+                data["abstract"],
+                padding="max_length",
+                max_length=256,
+                truncation=True,
+                return_tensors="pt",
+            )
+        else:
+            encoded = self.tokenizer(
+                data["title"],
+                padding="max_length",
+                max_length=256,
+                truncation=True,
+                return_tensors="pt",
+            )
 
         if index not in self.cache:
             positive_candidates = set(data["pos"]) & self.candidate_paper_set
@@ -134,6 +145,8 @@ class TripletIterableDataset(IterableDataset):
         self.query_paper_ids = query_paper_ids
         self.candidate_papers_ids = candidate_papers_ids
         self.config = config
+
+        self.triplet_generator = self._build_triplet_generator()
  
     def _build_triplet_generator(self):
         triplet_generator = TripletGenerator(
@@ -145,13 +158,17 @@ class TripletIterableDataset(IterableDataset):
         return triplet_generator
 
     def __iter__(self):
-        triplet_generator = self._build_triplet_generator()
-        for triplet in triplet_generator.generate_triplets():
-            query_paper = self.dataset[triplet[0]]
-            pos_paper = self.dataset[triplet[1]]
-            neg_paper = self.dataset[triplet[2]]
+        worker_info = get_worker_info()
+        mod = worker_info.num_workers
+        shift = worker_info.id
+        # triplet_generator = self._build_triplet_generator()
+        for i, triplet in enumerate(self.triplet_generator.generate_triplets()):
+            if (i + shift) % mod == 0:
+                query_paper = self.dataset[triplet[0]]
+                pos_paper = self.dataset[triplet[1]]
+                neg_paper = self.dataset[triplet[2]]
 
-            yield query_paper, pos_paper, neg_paper 
+                yield query_paper, pos_paper, neg_paper 
 
 
 class DistributedTripletIterableDataset(TripletIterableDataset):
@@ -191,6 +208,8 @@ if __name__ == "__main__":
     from torch.utils.data import DataLoader, get_worker_info
     import json
     import torch
+    from transformers import AutoTokenizer
+
 
     with open("./DBLP_train_test_dataset_1.json", "r") as f:
         data_json = json.load(f)
