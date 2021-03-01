@@ -1,6 +1,8 @@
 import torch
-from torch.utils.data import Dataset, IterableDataset
+from torch.utils.data import Dataset, IterableDataset, get_worker_info
 from typing import Dict, List, Any, Set, Optional
+
+from itertools import cycle
 
 from triplet_generator import TripletGenerator
 
@@ -89,7 +91,7 @@ class TripletDataset(Dataset):
         return len(self.triplet_list)
 
 
-class TripletCollator:
+class TripletCollater:
     def __init__(self, tokenizer, max_seq_len):
         self.tokenizer = tokenizer
         self.max_seq_len = max_seq_len
@@ -134,7 +136,9 @@ class TripletIterableDataset(IterableDataset):
         self.query_paper_ids = query_paper_ids
         self.candidate_papers_ids = candidate_papers_ids
         self.config = config
- 
+
+        self.triplet_generator = self._build_triplet_generator()
+
     def _build_triplet_generator(self):
         triplet_generator = TripletGenerator(
             self.dataset,
@@ -142,17 +146,28 @@ class TripletIterableDataset(IterableDataset):
             self.candidate_papers_ids,
             self.config
         )
-        return triplet_generator
+        return triplet_generator.generate_triplets()
 
     def __iter__(self):
-        triplet_generator = self._build_triplet_generator()
-        for triplet in triplet_generator.generate_triplets():
-            query_paper = self.dataset[triplet[0]]
-            pos_paper = self.dataset[triplet[1]]
-            neg_paper = self.dataset[triplet[2]]
+        return self
 
-            yield query_paper, pos_paper, neg_paper 
+    def __next__(self):
+        try:
+            triplet = next(self.triplet_generator)
 
+        except StopIteration:
+            self.triplet_generator = self._build_triplet_generator()
+            triplet = next(self.triplet_generator)
+
+        query_paper = self.dataset[triplet[0]]
+        pos_paper = self.dataset[triplet[1]]
+        neg_paper = self.dataset[triplet[2]]
+
+        return query_paper, pos_paper, neg_paper
+
+    def __len__(self):
+        return self.config.triplets_per_epoch
+            
 
 class DistributedTripletIterableDataset(TripletIterableDataset):
     def __init__(
@@ -186,11 +201,23 @@ class Config:
     ratio_hard_neg = 0.5
     ratio_nn_neg = 0.1
 
+def worker_fn(worker_id):
+    worker_info = get_worker_info()
+    num_workers = worker_info.num_workers
+    dataset = worker_info.dataset
+    size = len(dataset.query_paper_ids) // num_workers + 1
+
+    dataset.query_paper_ids = dataset.query_paper_ids[
+        worker_id * size : (worker_id + 1) * size
+    ]
 
 if __name__ == "__main__":
     from torch.utils.data import DataLoader, get_worker_info
     import json
     import torch
+    import random
+    import transformers
+    from triplet_generator import TripletGenerator
 
     with open("./DBLP_train_test_dataset_1.json", "r") as f:
         data_json = json.load(f)
@@ -198,22 +225,29 @@ if __name__ == "__main__":
         train_dataset = data_json["train"]
         val_dataset = data_json["valid"]
 
-
+    tokenizer = transformers.AutoTokenizer.from_pretrained("allenai/scibert_scivocab_cased")
+    collater = TripletCollator(tokenizer, 256)
     config = Config()    
     query_paper_ids = list(train_dataset.keys())
 
     dataset = TripletIterableDataset(
         train_dataset,
-        query_paper_ids,
+        query_paper_ids[:1],
         set(query_paper_ids),
         config
     )
+    triplet_generator = TripletGenerator(
+        train_dataset,
+        query_paper_ids[:1],
+        set(query_paper_ids),
+        config
+    ).generate_triplets()
 
-    print(query_paper_ids[:4])
-    # dataloader = DataLoader(dataset, num_workers=4, worker_init_fn=worker_fn)
+    dataloader = DataLoader(dataset, batch_size=8, num_workers=1, collate_fn=collater)
     # dataset.triplet_generator.update_nn_hard(torch.randn(len(train_dataset), 5), list(query_paper_ids))
-    for i in dataloader:
-        continue
-        # print(i[0]["ids"])
-        # a = [j["ids"][0] for j in i]
-        # print(a)
+    
+    print(len(dataloader))
+    # for j, i in enumerate(dataloader):
+    #     print(j)
+        
+

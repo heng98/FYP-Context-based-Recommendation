@@ -9,7 +9,7 @@ import transformers
 
 from model.embedding_model import EmbeddingModel
 from model.reranker_model import SimpleReranker
-from data.dataset import TripletDataset, TripletCollator
+from data.dataset import TripletDataset, TripletCollator, TripletIterableDataset
 from utils import distributed
 
 import json
@@ -131,6 +131,8 @@ if __name__ == "__main__":
     embedding_model.load_state_dict(state_dict)
     embedding_model = embedding_model.to(device)
 
+    mapping = {data["ids"]: idx for idx, data in enumerate(unpickled_data["dataset"])}
+
     # embedding = torch.empty((len(unpickled_data["dataset"]), 768), dtype=torch.float)
     # with torch.no_grad():
     #     for i, data in enumerate(tqdm(unpickled_data["dataset"])):
@@ -151,6 +153,13 @@ if __name__ == "__main__":
 
     # torch.save(embedding, "all_embedding_dblp.pth")
     # embedding = torch.load("all_embedding_dblp.pth")
+
+    train_triplet_dataset = TripletIterableDataset(
+        mapping
+    )
+
+
+
 
     train_triplet_dataset = TripletDataset(
         unpickled_data["train"], unpickled_data["dataset"]

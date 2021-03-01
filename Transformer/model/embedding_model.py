@@ -2,18 +2,22 @@ from typing import Dict
 import torch
 import torch.nn as nn
 
-from transformers import AutoModel
+from transformers import AutoModel, PreTrainedModel
 
 
-class EmbeddingModel(nn.Module):
-    def __init__(self, config):
+class EmbeddingModel(PreTrainedModel):
+    def __init__(self, model_args):
         super(EmbeddingModel, self).__init__()
-        self.config = config
+        self.model_args = model_args
         self.model = AutoModel.from_pretrained(
-            self.config.model_name, add_pooling_layer=False, return_dict=True
+            self.model_args.model_name_or_path,
+            add_pooling_layer=False,
+            return_dict=True,
         )
 
-        self.register_buffer("position_ids", torch.arange(config.max_seq_len).expand((1, -1)))
+        self.register_buffer(
+            "position_ids", torch.arange(model_args.max_seq_len).expand((1, -1))
+        )
 
     def forward(self, input: Dict[str, torch.Tensor]) -> torch.Tensor:
         output = self.model(

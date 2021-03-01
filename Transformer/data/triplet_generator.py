@@ -169,7 +169,7 @@ class TripletGenerator:
         skipped = 0
         success = 0
 
-        for query_paper_id in tqdm(self.query_papers_ids):
+        for query_paper_id in self.query_papers_ids:
             results = self._get_triplet(query_paper_id)
             if len(results) > 2:
                 for triplet in results:
