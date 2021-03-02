@@ -2,18 +2,17 @@ import torch
 import os
 import torch.distributed as dist
 
-def init_distributed_mode(config):
-    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
-        config.rank = int(os.environ["RANK"])
-        config.world_size = int(os.environ['WORLD_SIZE'])
-        config.gpu = int(os.environ['LOCAL_RANK'])
-
-        config.distributed = True
+def init_distributed_mode(args):
+    if args.local_rank != -1:
+        args.distributed = True
     else:
-        config.distributed = False
+        args.distributed = False
         return
 
-    torch.cuda.set_device(config.gpu)
+    args.train_triplets_per_epoch //= dist.get_world_size()
+    args.eval_triplets_per_epoch //= dist.get_world_size()
+
+    torch.cuda.set_device(args.local_rank)
 
     dist.init_process_group(backend='nccl')
 

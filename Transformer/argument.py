@@ -1,52 +1,24 @@
-from dataclasses import dataclass, field
+import argparse
 
-from typing import Optional
+def get_args():
+    parser = argparse.ArgumentParser()
 
-@dataclass
-class ModelArguments:
-    """
-    Arguments pertaining to which model/config/tokenizer we are going to fine-tune, or train from scratch.
-    """
+    parser.add_argument("--experiment_name", type=str, required=True)
+    parser.add_argument("--dataset_path", type=str, required=True)
 
-    model_name_or_path: Optional[str] = field(
-        default=None,
-        metadata={
-            "help": "The model checkpoint for weights initialization."
-            "Don't set if you want to train a model from scratch."
-        },
-    )
-    max_seq_len: int = field(
-        default=256,
-    )
+    parser.add_argument("--pretrained_model", type=str, required=True)
+    parser.add_argument("--max_seq_len", type=int, required=True)
 
+    parser.add_argument("--num_epoch", type=int, default=4)`
+    parser.add_argument("--train_triplets_per_epoch", type=int, default=100000)
+    parser.add_argument("--eval_triplets_per_epoch", type=int, default=10000)
+    parser.add_argument("--ratio_hard_neg", type=float, default=0.4)
+    parser.add_argument("--ratio_nn_neg", type=float, default=0.2)
+    parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
+    parser.add_argument("--logging_steps", type=int, default=10)
 
-@dataclass
-class ExperimentArguments:
-    """
-    Arguments pertaining to what data we are going to do in this training.
-    """
-
-    experiment_name: str = field(
-        default=None
-    )
-
-    dataset_path: str = field(
-        default=None
-    )
-
-    triplets_per_epoch: int = field(
-        default=100000
-    )
-
-    samples_per_query: int = field(
-        default=15
-    )
-
-    ratio_hard_neg: float = field(
-        default=0.4
-    )
-
-    ratio_nn_neg: float = field(
-        default=0.2
-    )
-
+    parser.add_argument("--local_rank", type=int, default=-1)
+    
+    args = parser.parse_args()
+    return args

@@ -10,7 +10,7 @@ class EmbeddingModel(PreTrainedModel):
         super(EmbeddingModel, self).__init__()
         self.model_args = model_args
         self.model = AutoModel.from_pretrained(
-            self.model_args.model_name_or_path,
+            self.model_args.pretrained_model,
             add_pooling_layer=False,
             return_dict=True,
         )
