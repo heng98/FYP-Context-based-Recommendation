@@ -171,6 +171,7 @@ class TripletGenerator:
 
         for query_paper_id in self.query_papers_ids:
             results = self._get_triplet(query_paper_id)
+            random.shuffle(results)
             if len(results) > 2:
                 for triplet in results:
                     yield triplet

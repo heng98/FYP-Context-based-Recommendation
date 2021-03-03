@@ -71,6 +71,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_name", type=str, default="allenai/scibert_scivocab_cased"
     )
+    parser.add_argument(
+        "--pretrained_model", type=str, default="allenai/scibert_scivocab_cased"
+    )
     parser.add_argument("--embedding_path", type=str)
     parser.add_argument("--max_seq_len", type=int, default=256)
     parser.add_argument("--weight_path", type=str, required=True)
@@ -82,7 +85,7 @@ if __name__ == "__main__":
     device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
     model = EmbeddingModel(config)
-    state_dict = torch.load(config.weight_path, map_location=device)["state_dict"]
+    state_dict = torch.load(config.weight_path, map_location=device)
     model.load_state_dict(state_dict)
     model = model.to(device)
     
@@ -92,11 +95,11 @@ if __name__ == "__main__":
         reranker_model.load_state_dict(reranker_state_dict)
         reranker_model = reranker_model.to(device)
     
-    tokenizer = AutoTokenizer.from_pretrained(config.model_name)
+    tokenizer = AutoTokenizer.from_pretrained("allenai/scibert_scivocab_cased")
     with open("DBLP_train_test_dataset_1.json", "r") as f:
         dataset = json.load(f)
 
-    train_idx_paper_idx_mapping = {data["ids"]: idx for idx, data in enumerate(dataset["train"])}
+    train_idx_paper_idx_mapping = {data: idx for idx, data in enumerate(dataset["train"])}
     train_paper_pos_dataset = PaperPosDataset(
         dataset["train"],
         train_idx_paper_idx_mapping,

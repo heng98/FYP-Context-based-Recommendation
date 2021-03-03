@@ -15,13 +15,16 @@ class Trainer:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.model = model.to(self.device)
+        if args.distributed:
+            self.model = torch.nn.parallel.DistributedDataParallel(self.model, device_ids=[args.local_rank])
+
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
         self.args = args
 
-        self.data_collator = data_collater
+        self.data_collater = data_collater
 
-        self.criterion = TripletLoss("l2_loss")
+        self.criterion = TripletLoss("l2_norm")
 
         self.global_step = 0
 
@@ -34,9 +37,6 @@ class Trainer:
         n = self._prepare_inputs(inputs[2])
 
         loss = self.compute_loss(q, p, n)
-
-        if self.args.n_gpu > 1:
-            loss = loss.mean()
 
         if self.args.gradient_accumulation_steps > 1:
             loss = loss / self.args.gradient_accumulation_steps
@@ -67,9 +67,13 @@ class Trainer:
         tr_loss = torch.tensor(0.0).to(self.device)
         for epoch in range(self.args.num_epoch):
             self.model.train()
+            
+            if distributed.is_main_process():
+                train_dataloader = tqdm(train_dataloader)
+
             for step, inputs in enumerate(train_dataloader):
                 if ((step + 1) != 0) and self.args.local_rank != -1:
-                    with self.model.nosync():
+                    with self.model.no_sync():
                         tr_loss += self.training_step(inputs)
                 else:
                     tr_loss += self.training_step(inputs)
@@ -81,11 +85,13 @@ class Trainer:
                     self.optimizer.zero_grad()
 
                 if (self.global_step + 1) % self.args.logging_steps == 0:
-                    self.log({"embedding/train_loss": tr_loss})
+                    tr_loss_scalar = tr_loss.item() / self.args.logging_steps
+                    tr_loss -= tr_loss
+                    self.log({"embedding/train_loss": tr_loss_scalar})
 
             eval_loss = self.evaluate()
-            self.log({"embedding/eval_loss": eval_loss})
-            self.save_model(f"weights/{self.args.experiment_name}/weights_{epoch}.pth")
+            self.log({"embedding/eval_loss": eval_loss.item()})
+            self.save_model(f"weights/{self.args.experiment_name}/weights_{epoch}")
 
     @torch.no_grad()
     def evaluate(self):
@@ -108,11 +114,9 @@ class Trainer:
             self.args.batch_size,
             collate_fn=self.data_collater,
             pin_memory=True,
-            drop_last=True
+            drop_last=True,
+            num_workers=1
         )
-
-        if distributed.is_main_process():
-            dataloader = tqdm(dataloader)
 
         return dataloader
 
@@ -122,6 +126,8 @@ class Trainer:
             self.args.batch_size,
             collate_fn=self.data_collater,
             pin_memory=True,
+            drop_last=True,
+            num_workers=1
         )
 
         if distributed.is_main_process():
@@ -144,16 +150,28 @@ class Trainer:
 
     def save_model(self, path):
         if distributed.is_main_process():
-            self.model.save_pretrained(path)
+            if hasattr(self.model, "module"):
+                model_to_save = self.model.module
+            else:
+                model_to_save = self.model
+
+            model_to_save.save_pretrained(path)
 
     def compute_loss(self, q, p, n):
-        query_embedding = self.model(q)
-        positive_embedding = self.model(p)
-        negative_embedding = self.model(n)
+        query_embedding = self.get_embedding(q)
+        positive_embedding = self.get_embedding(p)
+        negative_embedding = self.get_embedding(n)
 
         loss = self.criterion(query_embedding, positive_embedding, negative_embedding)
 
         return loss
+
+    def get_embedding(self, input):
+        return self.model(
+            input_ids=input["input_ids"],
+            attention_mask=input["attention_mask"],
+            token_type_ids=input["token_type_ids"]
+        )["pooler_output"]
 
     def _setup_optimizer(self, max_steps):
         no_decay = ["bias", "LayerNorm.weight"]
@@ -176,7 +194,7 @@ class Trainer:
             },
         ]
 
-        self.optimizer = AdamW(optimizer_grouped_parameters)
+        self.optimizer = AdamW(optimizer_grouped_parameters, lr=self.args.learning_rate)
 
         warmup_steps = int(max_steps * self.args.warmup_ratio)
         self.scheduler = get_linear_schedule_with_warmup(

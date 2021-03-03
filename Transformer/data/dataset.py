@@ -4,7 +4,7 @@ from typing import Dict, List, Any, Set, Optional
 
 from itertools import cycle
 
-from triplet_generator import TripletGenerator
+from .triplet_generator import TripletGenerator
 
 
 class PaperPosDataset(Dataset):
@@ -17,10 +17,13 @@ class PaperPosDataset(Dataset):
         self.candidate_paper_set = set(candidate_paper)
         self.tokenizer = tokenizer
 
+        self.mapping = list(dataset.keys())
+
+
         self.cache = {}
 
     def __getitem__(self, index: int):
-        data = self.dataset[index]
+        data = self.dataset[self.mapping[index]]
         encoded = self.tokenizer(
             data["title"],
             data["abstract"],
@@ -129,15 +132,19 @@ class TripletIterableDataset(IterableDataset):
         dataset: Dict[str, Dict[str, Any]],
         query_paper_ids: List[str],
         candidate_papers_ids: Set[str],
+        triplets_per_epcoh: int,
         config
     ):
         super().__init__()
         self.dataset = dataset
         self.query_paper_ids = query_paper_ids
         self.candidate_papers_ids = candidate_papers_ids
+        self.triplets_per_epoch = triplets_per_epcoh
         self.config = config
 
         self.triplet_generator = self._build_triplet_generator()
+
+        self._yielded = 0
 
     def _build_triplet_generator(self):
         triplet_generator = TripletGenerator(
@@ -152,7 +159,12 @@ class TripletIterableDataset(IterableDataset):
         return self
 
     def __next__(self):
+        if self._yielded == len(self):
+            self._yielded = 0
+            raise StopIteration
+
         try:
+            self._yielded += 1
             triplet = next(self.triplet_generator)
 
         except StopIteration:
@@ -166,7 +178,7 @@ class TripletIterableDataset(IterableDataset):
         return query_paper, pos_paper, neg_paper
 
     def __len__(self):
-        return self.config.triplets_per_epoch
+        return self.triplets_per_epoch
             
 
 class DistributedTripletIterableDataset(TripletIterableDataset):

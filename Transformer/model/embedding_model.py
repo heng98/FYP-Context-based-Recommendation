@@ -2,12 +2,12 @@ from typing import Dict
 import torch
 import torch.nn as nn
 
-from transformers import AutoModel, PreTrainedModel
+from transformers import AutoModel, PreTrainedModel, PretrainedConfig
 
 
 class EmbeddingModel(PreTrainedModel):
     def __init__(self, model_args):
-        super(EmbeddingModel, self).__init__()
+        super(EmbeddingModel, self).__init__(PretrainedConfig())
         self.model_args = model_args
         self.model = AutoModel.from_pretrained(
             self.model_args.pretrained_model,

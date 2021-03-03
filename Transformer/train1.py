@@ -3,8 +3,7 @@ import json
 import torch.nn as nn
 import torch.distributed as dist
 
-
-import transformers
+from transformers import AutoTokenizer, AutoModel
 
 from model.embedding_model import EmbeddingModel
 from utils import distributed
@@ -17,14 +16,15 @@ if __name__ == "__main__":
     args = get_args()
 
     distributed.init_distributed_mode(args)
-    model = EmbeddingModel(args)
-
+    
     # Initialize data and data processing
     with open(args.dataset_path, "r") as f:
         data_json = json.load(f)
         dataset_name = data_json["name"]
         train_dataset = data_json["train"]
         val_dataset = data_json["valid"]
+
+    dataset = {**train_dataset, **val_dataset}
 
     train_paper_ids = list(train_dataset.keys())
     val_paper_ids = list(val_dataset.keys())
@@ -48,22 +48,25 @@ if __name__ == "__main__":
         val_query_paper_ids = val_paper_ids[:]
 
     train_triplet_dataset = TripletIterableDataset(
-        train_dataset, train_paper_ids, set(train_paper_ids), args
+        dataset, train_paper_ids, set(train_paper_ids), args.train_triplets_per_epoch, args
     )
     test_triplet_dataset = TripletIterableDataset(
-        val_dataset,
+        dataset,
         val_paper_ids,
         set(train_paper_ids + val_paper_ids),
-        args,
+        args.eval_triplets_per_epoch,
+        args
     )
 
-    tokenizer = transformers.AutoTokenizer.from_pretrained(args.model_name)
+    tokenizer = AutoTokenizer.from_pretrained(args.pretrained_model)
     collater = TripletCollater(tokenizer, args.max_seq_len)
 
-    model = EmbeddingModel(args)
-    if args.distributed:
-        model = nn.parallel.DistributedDataParallel(model, device_ids=[args.local_rank])
-
+    model = AutoModel.from_pretrained(
+        args.pretrained_model,
+        # add_pooling_layer=False,
+        return_dict=True,
+    )
+    
     trainer = Trainer(
         model, train_triplet_dataset, test_triplet_dataset, args, data_collater=collater
     )

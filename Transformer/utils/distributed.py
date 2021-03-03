@@ -9,12 +9,14 @@ def init_distributed_mode(args):
         args.distributed = False
         return
 
+    dist.init_process_group(backend='nccl')
+
     args.train_triplets_per_epoch //= dist.get_world_size()
     args.eval_triplets_per_epoch //= dist.get_world_size()
 
     torch.cuda.set_device(args.local_rank)
 
-    dist.init_process_group(backend='nccl')
+    
 
 def reduce_mean(tensor):
     rt = tensor.detach().clone()
