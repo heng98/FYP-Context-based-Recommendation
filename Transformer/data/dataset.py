@@ -19,7 +19,6 @@ class PaperPosDataset(Dataset):
 
         self.mapping = list(dataset.keys())
 
-
         self.cache = {}
 
     def __getitem__(self, index: int):
@@ -126,6 +125,43 @@ class TripletCollater:
         )
 
 
+class TripletRankerCollater:
+    def __init__(self, tokenizer, max_seq_len):
+        self.tokenizer = tokenizer
+        self.max_seq_len = max_seq_len
+
+    def __call__(self, batch):
+        query = [data[0]["title"] + data[0]["abstract"] for data in batch]
+        pos = [data[1]["title"] + data[1]["abstract"] for data in batch]
+        neg = [data[2]["title"] + data[2]["abstract"] for data in batch]
+
+        query_encoded = self._encode(query).data
+        pos_encoded = self._encode(pos).data
+        neg_encoded = self._encode(neg).data
+
+        pos_encoded["input_ids"][:, 0] = self.tokenizer.sep_token_id
+        neg_encoded["input_ids"][:, 0] = self.tokenizer.sep_token_id
+
+        keys = query_encoded.keys()
+        query_pos_encoded = dict()
+        query_neg_encoded = dict()
+
+        for k in keys:
+            query_pos_encoded[k] = torch.cat([query_encoded[k], pos_encoded[k]], axis=1)
+            query_neg_encoded[k] = torch.cat([query_encoded[k], neg_encoded[k]], axis=1)
+
+        return query_pos_encoded, query_neg_encoded
+
+    def _encode(self, text: List[str]):
+        return self.tokenizer(
+            text,
+            padding="max_length",
+            max_length=self.max_seq_len // 2,
+            truncation=True,
+            return_tensors="pt",
+        )
+
+
 class TripletIterableDataset(IterableDataset):
     def __init__(
         self,
@@ -133,7 +169,7 @@ class TripletIterableDataset(IterableDataset):
         query_paper_ids: List[str],
         candidate_papers_ids: Set[str],
         triplets_per_epcoh: int,
-        config
+        config,
     ):
         super().__init__()
         self.dataset = dataset
@@ -148,10 +184,7 @@ class TripletIterableDataset(IterableDataset):
 
     def _build_triplet_generator(self):
         triplet_generator = TripletGenerator(
-            self.dataset,
-            self.query_paper_ids,
-            self.candidate_papers_ids,
-            self.config
+            self.dataset, self.query_paper_ids, self.candidate_papers_ids, self.config
         )
         return triplet_generator.generate_triplets()
 
@@ -179,87 +212,3 @@ class TripletIterableDataset(IterableDataset):
 
     def __len__(self):
         return self.triplets_per_epoch
-            
-
-class DistributedTripletIterableDataset(TripletIterableDataset):
-    def __init__(
-        self,
-        config,
-        query_paper_ids_idx_mapping: Dict[str, int],
-        candidate_papers_ids: Set[str],
-        dataset: List[Dict[str, Any]],
-        samples_per_query: int,
-        ratio_hard_neg: Optional[float] = 0.5,
-    ):
-        super().__init__(
-            query_paper_ids_idx_mapping,
-            candidate_papers_ids,
-            dataset,
-            samples_per_query,
-            ratio_hard_neg,
-        )
-        self.rank = config.rank
-        self.world_size = config.world_size
-
-        self.mod = -1
-        self.shift = -1
-
-    def __iter__(self):
-        pass
-
-
-class Config:
-    samples_per_query = 5
-    ratio_hard_neg = 0.5
-    ratio_nn_neg = 0.1
-
-def worker_fn(worker_id):
-    worker_info = get_worker_info()
-    num_workers = worker_info.num_workers
-    dataset = worker_info.dataset
-    size = len(dataset.query_paper_ids) // num_workers + 1
-
-    dataset.query_paper_ids = dataset.query_paper_ids[
-        worker_id * size : (worker_id + 1) * size
-    ]
-
-if __name__ == "__main__":
-    from torch.utils.data import DataLoader, get_worker_info
-    import json
-    import torch
-    import random
-    import transformers
-    from triplet_generator import TripletGenerator
-
-    with open("./DBLP_train_test_dataset_1.json", "r") as f:
-        data_json = json.load(f)
-        dataset_name = data_json["name"]
-        train_dataset = data_json["train"]
-        val_dataset = data_json["valid"]
-
-    tokenizer = transformers.AutoTokenizer.from_pretrained("allenai/scibert_scivocab_cased")
-    collater = TripletCollator(tokenizer, 256)
-    config = Config()    
-    query_paper_ids = list(train_dataset.keys())
-
-    dataset = TripletIterableDataset(
-        train_dataset,
-        query_paper_ids[:1],
-        set(query_paper_ids),
-        config
-    )
-    triplet_generator = TripletGenerator(
-        train_dataset,
-        query_paper_ids[:1],
-        set(query_paper_ids),
-        config
-    ).generate_triplets()
-
-    dataloader = DataLoader(dataset, batch_size=8, num_workers=1, collate_fn=collater)
-    # dataset.triplet_generator.update_nn_hard(torch.randn(len(train_dataset), 5), list(query_paper_ids))
-    
-    print(len(dataloader))
-    # for j, i in enumerate(dataloader):
-    #     print(j)
-        
-

@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
 
+from transformers import PreTrainedModel, AutoModel
+
+
 class SimpleReranker(nn.Module):
     def __init__(self):
         super(SimpleReranker, self).__init__()
@@ -20,3 +23,4 @@ class SimpleReranker(nn.Module):
         out = self.sigmoid
 
         return out
+    

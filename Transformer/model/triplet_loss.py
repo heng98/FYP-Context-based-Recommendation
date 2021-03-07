@@ -2,8 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from typing import NoReturn, Optional
-
 
 class TripletLoss(nn.Module):
     """Triplet loss for SPECTER
@@ -11,9 +9,7 @@ class TripletLoss(nn.Module):
     L = max{(d(q, p) - d(q, n) + m), 0}
     """
 
-    def __init__(
-        self, distance: Optional[str] = "cosine", margin: Optional[float] = 1
-    ) -> NoReturn:
+    def __init__(self, distance: str = "cosine", margin: float = 1.0):
         super(TripletLoss, self).__init__()
         """
         Args:
