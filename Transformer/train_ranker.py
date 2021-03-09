@@ -1,13 +1,12 @@
+import torch
 import torch.distributed as dist
 
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
-
-
 from data.dataset import TripletRankerCollater, TripletIterableDataset
-from model.reranker_model import SimpleReranker
+from data.preprocessor import SimplerRankerPreprocessor
+from model.reranker_model import SimpleRerankerForTraining
 from utils import distributed
 from argument import get_args
-from trainer import RankerTrainer
+from trainer import Trainer
 
 import json
 import logging
@@ -30,7 +29,7 @@ if __name__ == "__main__":
         val_dataset = data_json["valid"]
 
     dataset = {**train_dataset, **val_dataset}
-    ids_idx = {ids: idx for idx, ids in enumerate(train_dataset)}
+    paper_ids_idx_mapping = {ids: idx for idx, ids in enumerate(train_dataset)}
 
     train_paper_ids = list(train_dataset.keys())
     val_paper_ids = list(val_dataset.keys())
@@ -53,13 +52,21 @@ if __name__ == "__main__":
         train_query_paper_ids = train_paper_ids[:]
         val_query_paper_ids = val_paper_ids[:]
 
+    doc_embedding= torch.load("")
+    preprocessor = SimplerRankerPreprocessor(
+        doc_embedding, paper_ids_idx_mapping, ""
+    )
+
+
     train_triplet_dataset = TripletIterableDataset(
         dataset,
         train_paper_ids,
         set(train_paper_ids),
         args.train_triplets_per_epoch,
         args,
+        preprocessor=preprocessor
     )
+    train_triplet_dataset.triplet_generator.update_nn_hard(doc_embedding)
     test_triplet_dataset = TripletIterableDataset(
         dataset,
         [],
@@ -67,22 +74,13 @@ if __name__ == "__main__":
         set(train_paper_ids + val_paper_ids),
         args.eval_triplets_per_epoch,
         args,
+        preprocessor=preprocessor
     )
 
-    # tokenizer = AutoTokenizer.from_pretrained(args.pretrained_model)
-    # collater = TripletRankerCollater(tokenizer, args.max_seq_len)
-    collater = TripletRankerCollater()
+    model = SimpleRerankerForTraining(args)
 
-    # model = AutoModelForSequenceClassification.from_pretrained(
-    #     args.pretrained_model,
-    #     return_dict=True,
-    #     num_labels=1
-    # )
-
-    model = SimpleReranker()
-
-    trainer = RankerTrainer(
-        model, train_triplet_dataset, test_triplet_dataset, args, data_collater=collater, mapping=ids_idx
+    trainer = Trainer(
+        model, train_triplet_dataset, test_triplet_dataset, args
     )
 
     trainer.train()

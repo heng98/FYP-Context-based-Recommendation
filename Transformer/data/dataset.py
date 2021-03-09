@@ -5,6 +5,7 @@ from typing import Dict, List, Any, Set, Optional
 import re
 
 from .triplet_generator import TripletGenerator
+from .preprocessor import DefaultPreprocessor
 
 
 class PaperPosDataset(Dataset):
@@ -44,36 +45,6 @@ class PaperPosDataset(Dataset):
         return len(self.dataset)
 
 
-class QueryPairDataset(Dataset):
-    def __init__(self, triplet_list, embedding):
-        super(QueryPairDataset, self).__init__()
-
-        query_pairs = []
-        label = []
-
-        for q, p, n in triplet_list:
-            query_pairs.extend([(q, p), (q, n)])
-            label.extend([1, 0])
-
-        assert len(query_pairs) == len(label)
-
-        self.query_pairs = query_pairs
-        self.label = label
-        self.embedding = embedding
-        # self.dataset = dataset
-
-    def __getitem__(self, index: int):
-        query_idx, candidate_idx = self.query_pairs[index]
-        query = self.embedding[query_idx]
-        candidate = self.embedding[candidate_idx]
-        label = self.label[index]
-
-        return query, candidate, label
-
-    def __len__(self) -> int:
-        return len(self.query_pairs)
-
-
 class TripletDataset(Dataset):
     def __init__(self, triplet_list, dataset):
         super(TripletDataset, self).__init__()
@@ -99,20 +70,24 @@ class TripletCollater:
         self.max_seq_len = max_seq_len
 
     def __call__(self, batch):
-        query_title = [data[0]["title"] for data in batch]
-        query_abstract = [data[0]["abstract"] for data in batch]
+        query_title = [data["query_paper"]["title"] for data in batch]
+        query_abstract = [data["query_paper"]["abstract"] for data in batch]
 
-        pos_title = [data[1]["title"] for data in batch]
-        pos_abstract = [data[1]["abstract"] for data in batch]
+        pos_title = [data["pos_paper"]["title"] for data in batch]
+        pos_abstract = [data["pos_paper"]["abstract"] for data in batch]
 
-        neg_title = [data[2]["title"] for data in batch]
-        neg_abstract = [data[2]["abstract"] for data in batch]
+        neg_title = [data["neg_paper"]["title"] for data in batch]
+        neg_abstract = [data["neg_paper"]["abstract"] for data in batch]
 
-        query_encoded = self._encode(query_title, query_abstract)
-        pos_encoded = self._encode(pos_title, pos_abstract)
-        neg_encoded = self._encode(neg_title, neg_abstract)
+        encoded_query = self._encode(query_title, query_abstract)
+        encoded_pos = self._encode(pos_title, pos_abstract)
+        encoded_neg = self._encode(neg_title, neg_abstract)
 
-        return query_encoded.data, pos_encoded.data, neg_encoded.data
+        return {
+            "encoded_query": encoded_query,
+            "encoded_pos": encoded_pos,
+            "encoded_neg": encoded_neg,
+        }
 
     def _encode(self, title: List[str], abstract: List[str]):
         return self.tokenizer(
@@ -152,7 +127,7 @@ class TripletRankerCollater:
         #     query_neg_encoded[k] = torch.cat([query_encoded[k], neg_encoded[k]], axis=1)
 
         # return query_pos_encoded, query_neg_encoded
-        
+
         query_ids = [data[0]["ids"] for data in batch]
         pos_ids = [data[1]["ids"] for data in batch]
         neg_ids = [data[2]["ids"] for data in batch]
@@ -165,8 +140,6 @@ class TripletRankerCollater:
         query_neg_jaccard = torch.tensor([self._jaccard(query, neg)]).T
 
         return query_ids, pos_ids, neg_ids, query_pos_jaccard, query_neg_jaccard
-
-
 
     # def _encode(self, text: List[str]):
     #     return self.tokenizer(
@@ -185,9 +158,7 @@ class TripletRankerCollater:
         for t1, t2 in zip(tokenized_t1, tokenized_t2):
             union = len(set(t1).union(set(t2)))
             if union > 0:
-                result.append(
-                    len(set(t1).intersection(set(t2))) / union
-                )
+                result.append(len(set(t1).intersection(set(t2))) / union)
             else:
                 result.append(0)
 
@@ -195,13 +166,14 @@ class TripletRankerCollater:
 
 
 class TripletIterableDataset(IterableDataset):
-    def __init__(
+    def __init__( 
         self,
         dataset: Dict[str, Dict[str, Any]],
         query_paper_ids: List[str],
         candidate_papers_ids: Set[str],
         triplets_per_epcoh: int,
         config,
+        preprocessor=None,
     ):
         super().__init__()
         self.dataset = dataset
@@ -212,6 +184,7 @@ class TripletIterableDataset(IterableDataset):
 
         self.triplet_generator = self._build_triplet_generator()
 
+        self.preprocessor = preprocessor if not None else DefaultPreprocessor()
         self._yielded = 0
 
     def _build_triplet_generator(self):
@@ -240,7 +213,7 @@ class TripletIterableDataset(IterableDataset):
         pos_paper = self.dataset[triplet[1]]
         neg_paper = self.dataset[triplet[2]]
 
-        return query_paper, pos_paper, neg_paper
+        return self.preprocessor(query_paper, pos_paper, neg_paper)
 
     def __len__(self):
         return self.triplets_per_epoch

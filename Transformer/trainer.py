@@ -26,20 +26,15 @@ class Trainer:
         self.args = args
 
         self.data_collater = data_collater
-
-        self.criterion = TripletLoss("l2_norm")
-
         self.global_step = 0
 
         if distributed.is_main_process():
             self.tb_writer = SummaryWriter(f"runs/{args.experiment_name}")
 
     def training_step(self, inputs):
-        q = self._prepare_inputs(inputs[0])
-        p = self._prepare_inputs(inputs[1])
-        n = self._prepare_inputs(inputs[2])
+        inputs = self._prepare_inputs(inputs)
 
-        loss = self.compute_loss(q, p, n)
+        loss = self.model(**inputs)
 
         if self.args.gradient_accumulation_steps > 1:
             loss = loss / self.args.gradient_accumulation_steps
@@ -49,12 +44,9 @@ class Trainer:
         return loss.detach()
 
     def eval_step(self, inputs):
-        q = self._prepare_inputs(inputs[0])
-        p = self._prepare_inputs(inputs[1])
-        n = self._prepare_inputs(inputs[2])
+        inputs = self._prepare_inputs(inputs)
 
-        loss = self.compute_loss(q, p, n)
-
+        loss = self.model(**inputs)
         loss = loss.mean().detach()
 
         return loss
@@ -140,7 +132,12 @@ class Trainer:
 
     def _prepare_inputs(self, inputs):
         for k, v in inputs.items():
-            if isinstance(v, torch.Tensor):
+            if isinstance(v, dict):
+                for k1, v1 in v.items():
+                    if isinstance(v1, torch.Tensor):
+                        v[k1] = v1.to(self.device)
+
+            elif isinstance(v, torch.Tensor):
                 inputs[k] = v.to(self.device)
 
         return inputs
@@ -159,18 +156,6 @@ class Trainer:
                 model_to_save = self.model
 
             model_to_save.save_pretrained(path)
-
-    def compute_loss(self, q, p, n):
-        query_embedding = self.get_embedding(q)
-        positive_embedding = self.get_embedding(p)
-        negative_embedding = self.get_embedding(n)
-
-        loss = self.criterion(query_embedding, positive_embedding, negative_embedding)
-
-        return loss
-
-    def get_embedding(self, input):
-        return self.model(**input)["last_hidden_state"][:, 0]
 
     def _setup_optimizer(self, max_steps):
         no_decay = ["bias", "LayerNorm.weight"]
