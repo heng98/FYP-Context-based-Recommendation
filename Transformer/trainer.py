@@ -202,7 +202,7 @@ class Trainer:
 
 
 class RankerTrainer:
-    def __init__(self, model, train_dataset, eval_dataset, args, data_collater=None):
+    def __init__(self, model, train_dataset, eval_dataset, args, data_collater=None, **kwargs):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.model = model.to(self.device)
@@ -217,7 +217,9 @@ class RankerTrainer:
 
         self.data_collater = data_collater
 
-        self.criterion = nn.MarginRankingLoss(margin=0.5)
+        self.criterion = nn.MarginRankingLoss(margin=0.1)
+        self.embedding = torch.load("embedding_dblp_2.pth")
+        self.ids_idx = kwargs["mapping"]
 
         self.global_step = 0
 
@@ -225,10 +227,12 @@ class RankerTrainer:
             self.tb_writer = SummaryWriter(f"runs/{args.experiment_name}")
 
     def training_step(self, inputs):
-        p = self._prepare_inputs(inputs[0])
-        n = self._prepare_inputs(inputs[1])
+        # p = self._prepare_inputs(inputs[0])
+        # n = self._prepare_inputs(inputs[1])
 
-        loss = self.compute_loss(p, n)
+        inputs = self._prepare_inputs(inputs)
+
+        loss = self.compute_loss(inputs)
 
         if self.args.gradient_accumulation_steps > 1:
             loss = loss / self.args.gradient_accumulation_steps
@@ -238,10 +242,10 @@ class RankerTrainer:
         return loss.detach()
 
     def eval_step(self, inputs):
-        p = self._prepare_inputs(inputs[0])
-        n = self._prepare_inputs(inputs[1])
-
-        loss = self.compute_loss(p, n)
+        # p = self._prepare_inputs(inputs[0])
+        # n = self._prepare_inputs(inputs[1])
+        inputs = self._prepare_inputs(inputs)
+        loss = self.compute_loss(inputs)
 
         loss = loss.mean().detach()
 
@@ -329,9 +333,12 @@ class RankerTrainer:
     def get_embedding(self, input):
         return self.model(**input)["logits"]
 
-    def compute_loss(self, p, n):
-        positive_candidate = torch.sigmoid(self.get_embedding(p))
-        negative_candidate = torch.sigmoid(self.get_embedding(n))
+    def compute_loss(self, input):
+        # positive_candidate = torch.sigmoid(self.get_embedding(p))
+        # negative_candidate = torch.sigmoid(self.get_embedding(n))
+
+        positive_candidate = self.model(input[0], input[1])
+        negative_candidate = self.model(input[2], input[3])
 
         loss = self.criterion(
             positive_candidate,
@@ -342,11 +349,27 @@ class RankerTrainer:
         return loss
 
     def _prepare_inputs(self, inputs):
-        for k, v in inputs.items():
-            if isinstance(v, torch.Tensor):
-                inputs[k] = v.to(self.device)
+        query_idx = [self.ids_idx[ids] for ids in inputs[0]]
+        pos_idx = [self.ids_idx[ids] for ids in inputs[1]]
+        neg_idx = [self.ids_idx[ids] for ids in inputs[2]]
 
-        return inputs
+        query_pos_cosine = torch.nn.functional.cosine_similarity(
+            self.embedding[query_idx], self.embedding[pos_idx]
+        ).unsqueeze(0).T.to(self.device)
+        query_neg_cosine = torch.nn.functional.cosine_similarity(
+            self.embedding[query_idx], self.embedding[neg_idx]
+        ).unsqueeze(0).T.to(self.device)
+
+        query_pos_jaccard = inputs[3].to(self.device)
+        query_neg_jaccard = inputs[4].to(self.device)
+
+        return query_pos_cosine, query_pos_jaccard, query_neg_cosine, query_neg_jaccard
+
+        # for k, v in inputs.items():
+        #     if isinstance(v, torch.Tensor):
+        #         inputs[k] = v.to(self.device)
+
+        # return inputs
 
     def log(self, metrics):
         if distributed.is_main_process():
@@ -361,7 +384,8 @@ class RankerTrainer:
             else:
                 model_to_save = self.model
 
-            model_to_save.save_pretrained(path)
+            torch.save(model_to_save.state_dict(), path)
+            # model_to_save.save_pretrained(path)
 
     def _setup_optimizer(self, max_steps):
         no_decay = ["bias", "LayerNorm.weight"]

@@ -3,7 +3,8 @@ import torch.distributed as dist
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 
-from data.dataset import TripletCollator, TripletIterableDataset
+from data.dataset import TripletRankerCollater, TripletIterableDataset
+from model.reranker_model import SimpleReranker
 from utils import distributed
 from argument import get_args
 from trainer import RankerTrainer
@@ -29,6 +30,7 @@ if __name__ == "__main__":
         val_dataset = data_json["valid"]
 
     dataset = {**train_dataset, **val_dataset}
+    ids_idx = {ids: idx for idx, ids in enumerate(train_dataset)}
 
     train_paper_ids = list(train_dataset.keys())
     val_paper_ids = list(val_dataset.keys())
@@ -60,23 +62,27 @@ if __name__ == "__main__":
     )
     test_triplet_dataset = TripletIterableDataset(
         dataset,
-        val_paper_ids,
+        [],
+        # val_paper_ids,
         set(train_paper_ids + val_paper_ids),
         args.eval_triplets_per_epoch,
         args,
     )
 
-    tokenizer = AutoTokenizer.from_pretrained(args.pretrained_model)
-    # collater = TripletCollater(tokenizer, args.max_seq_len)
+    # tokenizer = AutoTokenizer.from_pretrained(args.pretrained_model)
+    # collater = TripletRankerCollater(tokenizer, args.max_seq_len)
+    collater = TripletRankerCollater()
 
-    model = AutoModelForSequenceClassification.from_pretrained(
-        args.pretrained_model,
-        return_dict=True,
-        num_labels=1
-    )
+    # model = AutoModelForSequenceClassification.from_pretrained(
+    #     args.pretrained_model,
+    #     return_dict=True,
+    #     num_labels=1
+    # )
+
+    model = SimpleReranker()
 
     trainer = RankerTrainer(
-        model, train_triplet_dataset, test_triplet_dataset, args, data_collater=collater
+        model, train_triplet_dataset, test_triplet_dataset, args, data_collater=collater, mapping=ids_idx
     )
 
     trainer.train()

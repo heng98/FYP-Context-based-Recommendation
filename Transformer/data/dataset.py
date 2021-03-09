@@ -2,7 +2,7 @@ import torch
 from torch.utils.data import Dataset, IterableDataset, get_worker_info
 from typing import Dict, List, Any, Set, Optional
 
-from itertools import cycle
+import re
 
 from .triplet_generator import TripletGenerator
 
@@ -126,40 +126,72 @@ class TripletCollater:
 
 
 class TripletRankerCollater:
-    def __init__(self, tokenizer, max_seq_len):
-        self.tokenizer = tokenizer
-        self.max_seq_len = max_seq_len
+    def __init__(self):
+        # self.tokenizer = tokenizer
+        # self.max_seq_len = max_seq_len
+        self.pattern = re.compile(r"[\w']+")
 
     def __call__(self, batch):
-        query = [data[0]["title"] + data[0]["abstract"] for data in batch]
-        pos = [data[1]["title"] + data[1]["abstract"] for data in batch]
-        neg = [data[2]["title"] + data[2]["abstract"] for data in batch]
+        # query = [data[0]["title"] + data[0]["abstract"] for data in batch]
+        # pos = [data[1]["title"] + data[1]["abstract"] for data in batch]
+        # neg = [data[2]["title"] + data[2]["abstract"] for data in batch]
 
-        query_encoded = self._encode(query).data
-        pos_encoded = self._encode(pos).data
-        neg_encoded = self._encode(neg).data
+        # query_encoded = self._encode(query).data
+        # pos_encoded = self._encode(pos).data
+        # neg_encoded = self._encode(neg).data
 
-        pos_encoded["input_ids"][:, 0] = self.tokenizer.sep_token_id
-        neg_encoded["input_ids"][:, 0] = self.tokenizer.sep_token_id
+        # pos_encoded["input_ids"][:, 0] = self.tokenizer.sep_token_id
+        # neg_encoded["input_ids"][:, 0] = self.tokenizer.sep_token_id
 
-        keys = query_encoded.keys()
-        query_pos_encoded = dict()
-        query_neg_encoded = dict()
+        # keys = query_encoded.keys()
+        # query_pos_encoded = dict()
+        # query_neg_encoded = dict()
 
-        for k in keys:
-            query_pos_encoded[k] = torch.cat([query_encoded[k], pos_encoded[k]], axis=1)
-            query_neg_encoded[k] = torch.cat([query_encoded[k], neg_encoded[k]], axis=1)
+        # for k in keys:
+        #     query_pos_encoded[k] = torch.cat([query_encoded[k], pos_encoded[k]], axis=1)
+        #     query_neg_encoded[k] = torch.cat([query_encoded[k], neg_encoded[k]], axis=1)
 
-        return query_pos_encoded, query_neg_encoded
+        # return query_pos_encoded, query_neg_encoded
+        
+        query_ids = [data[0]["ids"] for data in batch]
+        pos_ids = [data[1]["ids"] for data in batch]
+        neg_ids = [data[2]["ids"] for data in batch]
 
-    def _encode(self, text: List[str]):
-        return self.tokenizer(
-            text,
-            padding="max_length",
-            max_length=self.max_seq_len // 2,
-            truncation=True,
-            return_tensors="pt",
-        )
+        query = [data[0]["abstract"] for data in batch]
+        pos = [data[1]["abstract"] for data in batch]
+        neg = [data[2]["abstract"] for data in batch]
+
+        query_pos_jaccard = torch.tensor([self._jaccard(query, pos)]).T
+        query_neg_jaccard = torch.tensor([self._jaccard(query, neg)]).T
+
+        return query_ids, pos_ids, neg_ids, query_pos_jaccard, query_neg_jaccard
+
+
+
+    # def _encode(self, text: List[str]):
+    #     return self.tokenizer(
+    #         text,
+    #         padding="max_length",
+    #         max_length=self.max_seq_len // 2,
+    #         truncation=True,
+    #         return_tensors="pt",
+    #     )
+
+    def _jaccard(self, text_1, text_2):
+        result = []
+        tokenized_t1 = [self.pattern.findall(t1) for t1 in text_1]
+        tokenized_t2 = [self.pattern.findall(t2) for t2 in text_2]
+
+        for t1, t2 in zip(tokenized_t1, tokenized_t2):
+            union = len(set(t1).union(set(t2)))
+            if union > 0:
+                result.append(
+                    len(set(t1).intersection(set(t2))) / union
+                )
+            else:
+                result.append(0)
+
+        return result
 
 
 class TripletIterableDataset(IterableDataset):

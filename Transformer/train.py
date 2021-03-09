@@ -63,7 +63,7 @@ if __name__ == "__main__":
 
     model = AutoModel.from_pretrained(
         args.pretrained_model,
-        # add_pooling_layer=False,
+        add_pooling_layer=False,
         return_dict=True,
     )
     
