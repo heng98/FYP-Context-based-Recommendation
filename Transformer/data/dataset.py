@@ -80,7 +80,7 @@ class TripletCollater:
         neg_abstract = [data["neg_paper"]["abstract"] for data in batch]
 
         margin = [data["margin"] for data in batch]
-        margin = torch.tensor(margin, dtype="float32")
+        margin = torch.tensor(margin, dtype=torch.float32)
 
         encoded_query = self._encode(query_title, query_abstract)
         encoded_pos = self._encode(pos_title, pos_abstract)
@@ -88,8 +88,8 @@ class TripletCollater:
 
         return {
             "encoded_query": encoded_query,
-            "encoded_pos": encoded_pos,
-            "encoded_neg": encoded_neg,
+            "encoded_positive": encoded_pos,
+            "encoded_negative": encoded_neg,
             "margin": margin
         }
 
@@ -192,7 +192,7 @@ class TripletIterableDataset(IterableDataset):
         self.doc_embedding = doc_embedding
         self.triplet_generator = self._build_triplet_generator()
 
-        self.preprocessor = preprocessor if not None else DefaultPreprocessor()
+        self.preprocessor = preprocessor if preprocessor is not None else DefaultPreprocessor()
         self._yielded = 0
 
     def _build_triplet_generator(self):
@@ -223,7 +223,7 @@ class TripletIterableDataset(IterableDataset):
         pos_paper = self.dataset[triplet[1]]
         neg_paper = self.dataset[triplet[2]]
         margin = triplet[3]
-
+        
         return self.preprocessor(query_paper, pos_paper, neg_paper, margin)
 
     def __len__(self):

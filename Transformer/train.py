@@ -61,11 +61,7 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained(args.pretrained_model)
     collater = TripletCollater(tokenizer, args.max_seq_len)
 
-    model = AutoModel.from_pretrained(
-        args.pretrained_model,
-        add_pooling_layer=False,
-        return_dict=True,
-    )
+    model = EmbeddingModel(args)
     
     trainer = Trainer(
         model, train_triplet_dataset, test_triplet_dataset, args, data_collater=collater
