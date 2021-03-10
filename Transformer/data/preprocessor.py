@@ -13,11 +13,12 @@ class Preprocessor:
 
 
 class DefaultPreprocessor(Preprocessor):
-    def __call__(self, query_paper, pos_paper, neg_paper):
+    def __call__(self, query_paper, pos_paper, neg_paper, margin):
         return {
             "query_paper": query_paper,
             "pos_paper": pos_paper,
             "neg_paper": neg_paper,
+            "margin": margin
         }
 
 
@@ -56,13 +57,19 @@ class SimplerRankerPreprocessor(Preprocessor):
         neg_idx = self.paper_ids_idx_mapping[neg_paper["ids"]]
 
         query_pos_cos_sim = cosine_similarity(
-            self.doc_embedding[query_idx], self.doc_embedding[pos_idx]
+            self.doc_embedding[[query_idx]], self.doc_embedding[[pos_idx]]
         )
         query_neg_cos_sim = cosine_similarity(
-            self.doc_embedding[query_idx], self.doc_embedding[neg_idx]
+            self.doc_embedding[[query_idx]], self.doc_embedding[[neg_idx]]
         )
 
         return {
+            "query_title_embedding": self.model.get_sentence_vector(query_paper["title"]),
+            "pos_title_embedding": self.model.get_sentence_vector(pos_paper["title"]),
+            "neg_title_embedding": self.model.get_sentence_vector(neg_paper["title"]),
+            "query_abstract_embedding": self.model.get_sentence_vector(query_paper["abstract"]),
+            "pos_abstract_embedding": self.model.get_sentence_vector(pos_paper["abstract"]),
+            "neg_abstract_embedding": self.model.get_sentence_vector(neg_paper["abstract"]),
             "query_pos_abstract_jaccard": query_pos_abstract_jaccard,
             "query_neg_abstract_jaccard": query_neg_abstract_jaccard,
             "query_pos_abstract_inter_feature": query_pos_abstract_inter_feature,
@@ -80,9 +87,9 @@ class SimplerRankerPreprocessor(Preprocessor):
         intersection = tokenized_text_1_set.intersection(tokenized_text_2_set)
 
         if len(union) > 0:
-            return len(intersection) / len(union)
+            return np.array([len(intersection) / len(union)], dtype="float32")
         else:
-            return 0
+            return np.array([0], dtype="float32")
 
     def _intersection_feature(
         self, tokenized_text_1: List[str], tokenized_text_2: List[str]
@@ -91,13 +98,19 @@ class SimplerRankerPreprocessor(Preprocessor):
         tokenized_text_2_set = set(tokenized_text_2)
 
         intersection = tokenized_text_1_set.intersection(tokenized_text_2_set)
+        if len(intersection) == 0:
+            return np.zeros(self.model.get_dimension(), dtype="float32")
 
-        intersection_feature = np.empty((len(intersection), self.model.dim))
+        intersection_feature = np.empty((len(intersection), self.model.get_dimension()), dtype="float32")
         for i, word in enumerate(intersection):
             intersection_feature[i, :] = self.model.get_word_vector(word)
-
-        intersection_feature = np.linalg.norm(
-            np.sum(intersection_feature, axis=0), axis=1
+        intersection_feature = np.sum(intersection_feature, axis=0) / (
+            max(
+                np.linalg.norm(
+                    np.sum(intersection_feature, axis=0), 2
+                ), 
+                1e-8
+            )
         )
-
+            
         return intersection_feature

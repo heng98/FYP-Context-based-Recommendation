@@ -79,6 +79,9 @@ class TripletCollater:
         neg_title = [data["neg_paper"]["title"] for data in batch]
         neg_abstract = [data["neg_paper"]["abstract"] for data in batch]
 
+        margin = [data["margin"] for data in batch]
+        margin = torch.tensor(margin, dtype="float32")
+
         encoded_query = self._encode(query_title, query_abstract)
         encoded_pos = self._encode(pos_title, pos_abstract)
         encoded_neg = self._encode(neg_title, neg_abstract)
@@ -87,6 +90,7 @@ class TripletCollater:
             "encoded_query": encoded_query,
             "encoded_pos": encoded_pos,
             "encoded_neg": encoded_neg,
+            "margin": margin
         }
 
     def _encode(self, title: List[str], abstract: List[str]):
@@ -173,6 +177,8 @@ class TripletIterableDataset(IterableDataset):
         candidate_papers_ids: Set[str],
         triplets_per_epcoh: int,
         config,
+        nn_hard=False,
+        doc_embedding=None,
         preprocessor=None,
     ):
         super().__init__()
@@ -182,6 +188,8 @@ class TripletIterableDataset(IterableDataset):
         self.triplets_per_epoch = triplets_per_epcoh
         self.config = config
 
+        self.nn_hard = nn_hard
+        self.doc_embedding = doc_embedding
         self.triplet_generator = self._build_triplet_generator()
 
         self.preprocessor = preprocessor if not None else DefaultPreprocessor()
@@ -191,6 +199,8 @@ class TripletIterableDataset(IterableDataset):
         triplet_generator = TripletGenerator(
             self.dataset, self.query_paper_ids, self.candidate_papers_ids, self.config
         )
+        if self.nn_hard:
+            triplet_generator.update_nn_hard(self.doc_embedding)
         return triplet_generator.generate_triplets()
 
     def __iter__(self):
@@ -212,8 +222,9 @@ class TripletIterableDataset(IterableDataset):
         query_paper = self.dataset[triplet[0]]
         pos_paper = self.dataset[triplet[1]]
         neg_paper = self.dataset[triplet[2]]
+        margin = triplet[3]
 
-        return self.preprocessor(query_paper, pos_paper, neg_paper)
+        return self.preprocessor(query_paper, pos_paper, neg_paper, margin)
 
     def __len__(self):
         return self.triplets_per_epoch

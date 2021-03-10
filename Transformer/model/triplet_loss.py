@@ -21,10 +21,10 @@ class TripletLoss(nn.Module):
                 f"Distance function [{distance}] is not recognize"
             )
 
-        self.margin = margin
+        # self.margin = margin
 
     def forward(
-        self, query: torch.Tensor, positive: torch.Tensor, negative: torch.Tensor
+        self, query: torch.Tensor, positive: torch.Tensor, negative: torch.Tensor, margin: torch.Tensor
     ) -> torch.Tensor:
         if self.distance == "cosine":
             distance_positive = -F.cosine_similarity(query, positive)
@@ -33,7 +33,7 @@ class TripletLoss(nn.Module):
             distance_positive = F.pairwise_distance(query, positive)
             distance_negative = F.pairwise_distance(query, negative)
 
-        loss = F.relu(distance_positive - distance_negative + self.margin)
+        loss = F.relu(distance_positive - distance_negative + margin)
         loss = loss.mean()
 
         return loss

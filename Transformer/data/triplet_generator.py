@@ -12,6 +12,11 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 
+
+EASY_NEG = 1.0
+HARD_NEG = 0.6
+
+
 class TripletGenerator:
     def __init__(
         self,
@@ -61,7 +66,7 @@ class TripletGenerator:
             pos = random.choices(pos_candidates, k=n_easy_samples)
             neg = random.choices(easy_neg_candidates, k=n_easy_samples)
 
-            easy_samples = [(query_id, p, n) for p, n in zip(pos, neg)]
+            easy_samples = [(query_id, p, n, EASY_NEG) for p, n in zip(pos, neg)]
 
         return easy_samples
 
@@ -91,7 +96,7 @@ class TripletGenerator:
             pos = random.choices(pos_candidates, k=n_hard_samples)
             neg = random.choices(hard_neg_candidates, k=n_hard_samples)
 
-            hard_samples = [(query_id, p, n) for p, n in zip(pos, neg)]
+            hard_samples = [(query_id, p, n, HARD_NEG) for p, n in zip(pos, neg)]
 
         return hard_samples
 
@@ -99,8 +104,8 @@ class TripletGenerator:
         logger.info("Updating NN")
         self.nn_neg_flag = True
 
-        distance = pairwise_distances(doc_embedding)
-        top_k = np.argpartition(distance, 20)[:20]
+        distance = pairwise_distances(doc_embedding.numpy())
+        top_k = np.argpartition(distance, 10)[:, :10]
 
         num_of_doc = doc_embedding.shape[0]
         self_idx = np.array(range(num_of_doc)).reshape(num_of_doc, -1)

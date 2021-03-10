@@ -2,10 +2,8 @@ import torch
 import numpy as np
 from sklearn.metrics import ndcg_score
 
-from torch.utils.data import DataLoader
-from model.embedding_model import EmbeddingModel
+
 from model.reranker_model import SimpleReranker
-from data.dataset import PaperPosDataset
 from candidate_selector.ann.ann_annoy import ANNAnnoy
 from candidate_selector.ann.ann_candidate_selector import ANNCandidateSelector
 from ranker import Ranker, TransformerRanker
@@ -82,8 +80,8 @@ if __name__ == "__main__":
     parser.add_argument("--reranker_weight_path", type=str)
     config = parser.parse_args()
 
-    device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
-    ranker_device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    ranker_device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
     model = AutoModel.from_pretrained(config.weight_path, return_dict=True, add_pooling_layer=False)
     model = model.to(device)
@@ -138,7 +136,7 @@ if __name__ == "__main__":
             ann, 8, dataset["train"], train_paper_ids_idx_mapping
         )
         if config.reranker_weight_path:
-            ranker = Ranker(reranker_model, doc_embedding_vectors, ranker_device)
+            ranker = Ranker(reranker_model, doc_embedding_vectors, ranker_device, "cc.en.300.bin")
             # ranker = TransformerRanker(reranker_model, ranker_device, tokenizer)
 
         mrr_list = []

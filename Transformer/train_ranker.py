@@ -52,11 +52,10 @@ if __name__ == "__main__":
         train_query_paper_ids = train_paper_ids[:]
         val_query_paper_ids = val_paper_ids[:]
 
-    doc_embedding= torch.load("")
+    doc_embedding= torch.load("embedding_dblp_2.pth")
     preprocessor = SimplerRankerPreprocessor(
-        doc_embedding, paper_ids_idx_mapping, ""
+        doc_embedding, paper_ids_idx_mapping, "cc.en.300.bin"
     )
-
 
     train_triplet_dataset = TripletIterableDataset(
         dataset,
@@ -64,9 +63,11 @@ if __name__ == "__main__":
         set(train_paper_ids),
         args.train_triplets_per_epoch,
         args,
-        preprocessor=preprocessor
+        preprocessor=preprocessor,
+        nn_hard=True,
+        doc_embedding=doc_embedding
     )
-    train_triplet_dataset.triplet_generator.update_nn_hard(doc_embedding)
+    # train_triplet_dataset.triplet_generator.update_nn_hard(doc_embedding)
     test_triplet_dataset = TripletIterableDataset(
         dataset,
         [],

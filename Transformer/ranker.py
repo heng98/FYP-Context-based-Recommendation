@@ -17,6 +17,27 @@ class Ranker:
         self.tokenizer = get_tokenizer("basic_english")
 
     def rank(self, query_embedding, candidates, query_data, candidate_data):
+        query_title_embedding = self.model.get_sentence_vector(query_data["title"])
+        candidate_title_embedding = np.stack(
+            [self.model.get_sentence_vector(c["title"]) for c in candidate_data]\
+        )
+
+        query_abstract_embedding = self.model.get_sentence_vector(query_data["abstract"])
+        candidate_abstract_embedding = np.stack(
+            [self.model.get_sentence_vector(c["abstract"]) for c in candidate_data]\
+        )
+
+        query_title_embedding = torch.from_numpy(query_title_embedding).expand(
+            candidate_title_embedding.shape[0], -1
+        ).to(self.device)
+        candidate_title_embedding = torch.from_numpy(candidate_title_embedding).to(self.device)
+
+        query_abstract_embedding = torch.from_numpy(query_abstract_embedding).expand(
+            candidate_abstract_embedding.shape[0], -1
+        ).to(self.device)
+        candidate_abstract_embedding = torch.from_numpy(candidate_abstract_embedding).to(self.device)
+
+
         candidates_idx = [c[0] for c in candidates]
         query_embedding = query_embedding.expand(len(candidates), -1).to(self.device)
         candidates_embedding = torch.from_numpy(
@@ -41,9 +62,17 @@ class Ranker:
             self._intersection_feature(
                 tokenized_query_abstract, tokenized_candidate_abstract
             )
-        )
+        ).to(self.device)
 
-        confidence = self.reranker_model(jaccard, intersection_feature, cos_similarity)
+        confidence = self.reranker_model(
+            query_title_embedding, 
+            candidate_title_embedding, 
+            query_abstract_embedding, 
+            candidate_abstract_embedding, 
+            jaccard, 
+            intersection_feature, 
+            cos_similarity
+        )
         confidence = confidence.flatten().tolist()
 
         reranked_candidates = [
@@ -70,17 +99,22 @@ class Ranker:
         tokenized_text_1_set = set(text_1)
         tokenized_text_2_set = [set(t2) for t2 in text_2]
 
-        result_intersection_feature = np.empty(len(text_2), self.model.dim)
+        result_intersection_feature = np.empty((len(text_2), self.model.get_dimension()), dtype="float32")
 
         for j, t2 in enumerate(tokenized_text_2_set):
             intersection = tokenized_text_1_set.intersection(t2)
 
-            intersection_feature = np.empty((len(intersection), self.model.dim))
+            intersection_feature = np.empty((len(intersection), self.model.get_dimension()))
             for i, word in enumerate(intersection):
                 intersection_feature[i, :] = self.model.get_word_vector(word)
 
-            intersection_feature = np.linalg.norm(
-                np.sum(intersection_feature, axis=0), axis=1
+            intersection_feature = np.sum(intersection_feature, axis=0) / (
+                max(
+                    np.linalg.norm(
+                        np.sum(intersection_feature, axis=0), 2
+                    ), 
+                    1e-8
+                )
             )
 
             result_intersection_feature[j, :] = intersection_feature
