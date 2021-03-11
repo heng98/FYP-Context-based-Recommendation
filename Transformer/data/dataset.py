@@ -1,7 +1,8 @@
 import torch
 from torch.utils.data import Dataset, IterableDataset, get_worker_info
-from typing import Dict, List, Any, Set, Optional
 
+import random
+from typing import Dict, List, Any, Set
 import re
 
 from .triplet_generator import TripletGenerator
@@ -90,7 +91,7 @@ class TripletCollater:
             "encoded_query": encoded_query,
             "encoded_positive": encoded_pos,
             "encoded_negative": encoded_neg,
-            "margin": margin
+            "margin": margin,
         }
 
     def _encode(self, title: List[str], abstract: List[str]):
@@ -170,7 +171,7 @@ class TripletRankerCollater:
 
 
 class TripletIterableDataset(IterableDataset):
-    def __init__( 
+    def __init__(
         self,
         dataset: Dict[str, Dict[str, Any]],
         query_paper_ids: List[str],
@@ -192,7 +193,9 @@ class TripletIterableDataset(IterableDataset):
         self.doc_embedding = doc_embedding
         self.triplet_generator = self._build_triplet_generator()
 
-        self.preprocessor = preprocessor if preprocessor is not None else DefaultPreprocessor()
+        self.preprocessor = (
+            preprocessor if preprocessor is not None else DefaultPreprocessor()
+        )
         self._yielded = 0
 
     def _build_triplet_generator(self):
@@ -223,8 +226,70 @@ class TripletIterableDataset(IterableDataset):
         pos_paper = self.dataset[triplet[1]]
         neg_paper = self.dataset[triplet[2]]
         margin = triplet[3]
-        
+
         return self.preprocessor(query_paper, pos_paper, neg_paper, margin)
 
     def __len__(self):
         return self.triplets_per_epoch
+
+
+# Dataset {query_ids:"", neg_ids: ["", ""]}
+class GroupedTrainedDataset(Dataset):
+    def __init__(self, args, corpus, dataset):
+        super(GroupedTrainedDataset, self).__init__()
+        self.args = args
+        self.corpus = corpus
+        self.dataset = dataset
+
+    def __getitem__(self, index):
+        query_id = self.dataset[index]["query_ids"]
+        positive_ids = self.dataset[index]["positive_ids"]
+        negative_ids = self.dataset[index]["negative_ids"]
+
+        if len(positive_ids) == 0:
+            positive_ids = self.corpus[query_id]["citations"]
+
+        query_abstract = self.corpus[query_id]["abstract"]
+        positive_abstract = self.corpus[random.choice(positive_ids)]["abstract"]
+
+        if len(negative_ids) < self.args.group_size - 1:
+            negative_abstracts = [
+                self.corpus[neg_id]["abstract"]
+                for neg_id in random.choices(negative_ids, k=self.args.group_size - 1)
+            ]
+        else:
+            negative_abstracts = [
+                self.corpus[neg_id]["abstract"]
+                for neg_id in random.sample(negative_ids, k=self.args.group_size - 1)
+            ]
+
+        group = [(query_abstract, positive_abstract)] + [
+            (query_abstract, negative_abstract)
+            for negative_abstract in negative_abstracts
+        ]
+
+        return group
+
+    def __len__(self):
+        return len(self.dataset)
+
+
+class GroupedTrainedCollater:
+    def __init__(self, tokenizer):
+        self.tokenizer = tokenizer
+
+    def __call__(self, batch):
+        query_abstract = [data[0] for group in batch for data in group]
+        candidate_abstract = [data[1] for group in batch for data in group]
+
+        return self._encode(query_abstract, candidate_abstract)
+
+    def _encode(self, query_abstract: List[str], candidate_abstract: List[str]):
+        return self.tokenizer(
+            query_abstract,
+            candidate_abstract,
+            padding="max_length",
+            max_length=self.max_seq_len,
+            truncation="only_second",
+            return_tensors="pt",
+        )

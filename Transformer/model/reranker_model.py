@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from transformers import AutoModelForSequenceClassification
 
 class SimpleReranker(nn.Module):
     def __init__(self):
@@ -103,3 +104,32 @@ class SimpleRerankerForTraining(nn.Module):
     def save_pretrained(self, path):
         torch.save(self.model.state_dict(), path)
 
+
+class TransformerRanker(nn.Module):
+    def __init__(self, args):
+        super(TransformerRanker, self).__init__()
+        self.args = args
+
+        self.model = AutoModelForSequenceClassification(
+            args.pretrained_model,
+            return_dict=True,
+            num_labels=1
+        )
+
+        self.criterion = nn.CrossEntropyLoss()
+        self.register_buffer(
+            "label",
+            torch.zeros(self.args.batch_size, dtype=torch.long)
+        )
+
+    def forward(self, inputs):
+        logits = self.model(**inputs)["logits"]
+
+        scores = logits.view(
+            self.args.batch_size,
+            self.args.train_group_size
+        )
+
+        loss = self.criterion(scores, self.label)
+
+        return loss
