@@ -12,6 +12,11 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 
+
+EASY_NEG = 1.0
+HARD_NEG = 0.6
+
+
 class TripletGenerator:
     def __init__(
         self,
@@ -61,7 +66,7 @@ class TripletGenerator:
             pos = random.choices(pos_candidates, k=n_easy_samples)
             neg = random.choices(easy_neg_candidates, k=n_easy_samples)
 
-            easy_samples = [(query_id, p, n) for p, n in zip(pos, neg)]
+            easy_samples = [(query_id, p, n, EASY_NEG) for p, n in zip(pos, neg)]
 
         return easy_samples
 
@@ -91,24 +96,25 @@ class TripletGenerator:
             pos = random.choices(pos_candidates, k=n_hard_samples)
             neg = random.choices(hard_neg_candidates, k=n_hard_samples)
 
-            hard_samples = [(query_id, p, n) for p, n in zip(pos, neg)]
+            hard_samples = [(query_id, p, n, HARD_NEG) for p, n in zip(pos, neg)]
 
         return hard_samples
 
-    def update_nn_hard(self, doc_embedding, paper_ids_seq):
+    def update_nn_hard(self, doc_embedding):
         logger.info("Updating NN")
         self.nn_neg_flag = True
 
-        distance = pairwise_distances(doc_embedding)
-        top_k = np.argpartition(distance, 10)[:10]
+        distance = pairwise_distances(doc_embedding.numpy())
+        top_k = np.argpartition(distance, 10)[:, :10]
 
         num_of_doc = doc_embedding.shape[0]
         self_idx = np.array(range(num_of_doc)).reshape(num_of_doc, -1)
 
         top_k = top_k[top_k != self_idx].reshape(num_of_doc, -1)
 
-        for paper_id, top_k_nn in zip(tqdm(paper_ids_seq), top_k):
-            nn_hard_candidate = [paper_ids_seq[i] for i in top_k_nn]
+        # TODO
+        for paper_id, top_k_nn in zip(tqdm(self.query_papers_ids), top_k):
+            nn_hard_candidate = [self.query_papers_ids[i] for i in top_k_nn]
             data = self.dataset[paper_id]
             nn_hard = list(
                 set(nn_hard_candidate) - set(data["hard_neg"]) - set(data["pos"])
@@ -169,8 +175,9 @@ class TripletGenerator:
         skipped = 0
         success = 0
 
-        for query_paper_id in tqdm(self.query_papers_ids):
+        for query_paper_id in self.query_papers_ids:
             results = self._get_triplet(query_paper_id)
+            random.shuffle(results)
             if len(results) > 2:
                 for triplet in results:
                     yield triplet

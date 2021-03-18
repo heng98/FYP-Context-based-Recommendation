@@ -2,8 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from typing import NoReturn, Optional
-
 
 class TripletLoss(nn.Module):
     """Triplet loss for SPECTER
@@ -11,9 +9,7 @@ class TripletLoss(nn.Module):
     L = max{(d(q, p) - d(q, n) + m), 0}
     """
 
-    def __init__(
-        self, distance: Optional[str] = "cosine", margin: Optional[float] = 1
-    ) -> NoReturn:
+    def __init__(self, distance: str = "cosine", margin: float = 1.0):
         super(TripletLoss, self).__init__()
         """
         Args:
@@ -25,10 +21,10 @@ class TripletLoss(nn.Module):
                 f"Distance function [{distance}] is not recognize"
             )
 
-        self.margin = margin
+        # self.margin = margin
 
     def forward(
-        self, query: torch.Tensor, positive: torch.Tensor, negative: torch.Tensor
+        self, query: torch.Tensor, positive: torch.Tensor, negative: torch.Tensor, margin: torch.Tensor
     ) -> torch.Tensor:
         if self.distance == "cosine":
             distance_positive = -F.cosine_similarity(query, positive)
@@ -37,7 +33,7 @@ class TripletLoss(nn.Module):
             distance_positive = F.pairwise_distance(query, positive)
             distance_negative = F.pairwise_distance(query, negative)
 
-        loss = F.relu(distance_positive - distance_negative + self.margin)
+        loss = F.relu(distance_positive - distance_negative + margin)
         loss = loss.mean()
 
         return loss

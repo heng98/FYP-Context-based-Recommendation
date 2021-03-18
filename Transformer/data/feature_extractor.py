@@ -136,7 +136,7 @@ if __name__ == "__main__":
     logger.info(f"Num of validation paper: {len(val_paper)}")
     logger.info(f"Num of testing paper: {len(test_paper)}")
 
-    with open(f"{args.save_dir}/{dataset_name}_train_test_dataset_1.json", "w") as f:
+    with open(f"{args.save_dir}/{dataset_name}_train_test_dataset.json", "w") as f:
         json.dump(
             {   
                 "name": dataset_name,

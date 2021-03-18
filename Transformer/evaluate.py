@@ -2,19 +2,17 @@ import torch
 import numpy as np
 from sklearn.metrics import ndcg_score
 
-from torch.utils.data import DataLoader
-from model.embedding_model import EmbeddingModel
+
 from model.reranker_model import SimpleReranker
-from data.dataset import PaperPosDataset
 from candidate_selector.ann.ann_annoy import ANNAnnoy
 from candidate_selector.ann.ann_candidate_selector import ANNCandidateSelector
-from ranker import Ranker
+from ranker import Ranker, TransformerRanker
 
 import argparse
 import json
 from tqdm import tqdm
 import logging
-from transformers import AutoTokenizer, AutoModel
+from transformers import AutoTokenizer, AutoModel, AutoModelForSequenceClassification
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -71,6 +69,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_name", type=str, default="allenai/scibert_scivocab_cased"
     )
+    parser.add_argument(
+        "--pretrained_model", type=str, default="allenai/scibert_scivocab_cased"
+    )
     parser.add_argument("--embedding_path", type=str)
     parser.add_argument("--max_seq_len", type=int, default=256)
     parser.add_argument("--weight_path", type=str, required=True)
@@ -79,37 +80,29 @@ if __name__ == "__main__":
     parser.add_argument("--reranker_weight_path", type=str)
     config = parser.parse_args()
 
-    device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    ranker_device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
-    model = EmbeddingModel(config)
-    state_dict = torch.load(config.weight_path, map_location=device)["state_dict"]
-    model.load_state_dict(state_dict)
+    model = AutoModel.from_pretrained(config.weight_path, return_dict=True, add_pooling_layer=False)
     model = model.to(device)
     
     if config.reranker_weight_path:
+        # reranker_model = AutoModelForSequenceClassification.from_pretrained(
+        #     config.reranker_weight_path,
+        #     return_dict=True,
+        #     num_labels=1
+        # )
         reranker_model = SimpleReranker()
-        reranker_state_dict = torch.load(config.reranker_weight_path)["state_dict"]
-        reranker_model.load_state_dict(reranker_state_dict)
-        reranker_model = reranker_model.to(device)
+        reranker_model = reranker_model.to(ranker_device)
         reranker_model.eval()
     
-    tokenizer = AutoTokenizer.from_pretrained(config.model_name)
+    tokenizer = AutoTokenizer.from_pretrained("allenai/cs_roberta_base")
     with open("DBLP_train_test_dataset_1.json", "r") as f:
         dataset = json.load(f)
 
-    train_idx_paper_idx_mapping = {ids: idx for idx, ids in enumerate(dataset["train"].keys())}
-    train_paper_pos_dataset = PaperPosDataset(
-        list(dataset["train"].values()),
-        train_idx_paper_idx_mapping,
-        tokenizer
-    )
+    train_paper_ids_idx_mapping = {ids: idx for idx, ids in enumerate(dataset["train"])}
 
-    test_paper_pos_dataset = PaperPosDataset(
-        list(dataset["test"].values()),
-        train_idx_paper_idx_mapping,
-        tokenizer,
-        abstract=False
-    )
+    test_mapping = list(dataset["test"].keys())
 
     model.eval()
     with torch.no_grad():
@@ -117,11 +110,20 @@ if __name__ == "__main__":
             logger.info("Load from embedding")
             doc_embedding_vectors = torch.load(config.embedding_path)
         else:
-            doc_embedding_vectors = torch.empty(len(train_paper_pos_dataset), 768)
-            for i, (encoded, _) in enumerate(tqdm(train_paper_pos_dataset)):
+            doc_embedding_vectors = torch.empty(len(dataset["train"]), 768)
+            for i, data in enumerate(tqdm(dataset["train"].values())):
+                encoded = tokenizer(
+                    data["title"],
+                    data["abstract"],
+                    padding="max_length",
+                    max_length=256,
+                    truncation=True,
+                    return_tensors="pt",
+                )
+
                 encoded = to_device_dict(encoded, device)
         
-                query_embedding = model(encoded)
+                query_embedding = model(**encoded)["last_hidden_state"][:, 0]
                 doc_embedding_vectors[i] = query_embedding
 
             torch.save(doc_embedding_vectors, "embedding_dblp_2.pth")
@@ -131,10 +133,11 @@ if __name__ == "__main__":
         ann = ANNAnnoy.build_graph(doc_embedding_vectors)
         # 8
         ann_candidate_selector = ANNCandidateSelector(
-            ann, 8, train_paper_pos_dataset, train_idx_paper_idx_mapping
+            ann, 8, dataset["train"], train_paper_ids_idx_mapping
         )
         if config.reranker_weight_path:
-            ranker = Ranker(reranker_model, doc_embedding_vectors, device)
+            ranker = Ranker(reranker_model, doc_embedding_vectors, ranker_device, "cc.en.300.bin")
+            # ranker = TransformerRanker(reranker_model, ranker_device, tokenizer)
 
         mrr_list = []
         p_list = []
@@ -144,26 +147,36 @@ if __name__ == "__main__":
 
         logger.info("Evaluating")
         skipped = 0
-        for i, (query, positive) in enumerate(tqdm(test_paper_pos_dataset)):
-            if len(positive) < 10:
+        for i, query_data in enumerate(tqdm(dataset["test"].values())):
+            pos = set(query_data["pos"]) & set(dataset["train"])
+            if len(pos) < 10:
                 skipped += 1
                 continue
 
+            query = tokenizer(
+                query_data["title"],
+                query_data["abstract"],
+                padding="max_length",
+                max_length=256,
+                truncation=True,
+                return_tensors="pt",
+            )
+
             query = to_device_dict(query, device)
-            query_embedding = model(query)
+                
+            query_embedding = model(**query)["last_hidden_state"][:, 0]
             query_embedding_numpy = query_embedding.clone().cpu().numpy()[0]
 
             candidates = ann_candidate_selector.get_candidate(query_embedding_numpy)
-           
+            candidates_idx = [(train_paper_ids_idx_mapping[c[0]], c[1]) for c in candidates]
             if config.reranker_weight_path:
-                candidates = ranker.rank(query_embedding, candidates)
+                candidates = ranker.rank(
+                    query_embedding, candidates_idx, query_data, [dataset["train"][c[0]] for c in candidates]
+                )
+                # candidates = ranker.rank(query_data, [dataset["train"][c[0]] for c in candidates])
 
-            # logger.info(dataset["test"][i])
-            # for c in candidates:
-            #     logger.info(dataset["train"][c[0]]["title"])
             
-
-            mrr_score, precision, recall, f1, ndcg_value = eval_score(candidates, positive, k=20)
+            mrr_score, precision, recall, f1, ndcg_value = eval_score(candidates, pos, k=20)
 
             logger.info(f"MRR: {mrr_score}, P@5: {precision}, R@5: {recall}, f1@5: {f1}")
             mrr_list.append(mrr_score)
