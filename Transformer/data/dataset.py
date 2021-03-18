@@ -11,7 +11,7 @@ from .preprocessor import DefaultPreprocessor
 
 class PaperPosDataset(Dataset):
     def __init__(
-        self, dataset: List[Dict[str, Any]], candidate_paper: Dict[str, int], tokenizer
+        self, dataset: List[Dict[str, Any]], candidate_paper: Dict[str, int], tokenizer, abstract=True
     ):
         super(PaperPosDataset, self).__init__()
         self.dataset = dataset

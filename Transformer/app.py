@@ -1,18 +1,23 @@
 from flask import (
     Flask,
-    request
+    request,
     render_template
 )
 
 import torch
 from transformers import AutoTokenizer
-from Transformer.model.embedding_model import EmbeddingModel
-from Transformer.candidate_selector.ann.ann_annoy import ANNAnnoy
+from model.embedding_model import EmbeddingModel
+from candidate_selector.ann.ann_annoy import ANNAnnoy
 # from Transformer.candidate_selector.ann.ann_candidate_selector import ANNCandidateSelector
 
 import json
 import numpy as np
 
+class Config:
+    model_name = "allenai/scibert_scivocab_cased"
+    max_seq_len = 256
+    weight_path = "weights/dblp_with_nn_2/weights_1.pth"
+    embedding_path = "embedding_dblp_2.pth"
 
 class ANNCandidateSelector:
     def __init__(
@@ -33,7 +38,7 @@ class ANNCandidateSelector:
         if self.extend_candidate:
             candidate_set = set(candidate)
             for i in candidate:
-                citation_of_nn = self.train_paper_dataset[self.mapping[i]]["pos"]
+                citation_of_nn = self.train_paper_dataset[self.idx_paper_ids_mapping[i]]["pos"]
                 candidate_set.update([self.mapping[c] for c in citation_of_nn])
 
             candidate = list(candidate_set)
@@ -54,12 +59,11 @@ class ANNCandidateSelector:
 app = Flask(__name__)
 
 device = torch.device("cuda")
-
+config = Config()
 model = EmbeddingModel(config)
 state_dict = torch.load(config.weight_path, map_location=device)["state_dict"]
 model.load_state_dict(state_dict)
 model = model.to(device)
-
 
 tokenizer = AutoTokenizer.from_pretrained(config.model_name)
 
@@ -72,7 +76,7 @@ with open("DBLP_train_test_dataset_1.json", "r") as f:
 
 assert doc_embedding_vectors.shape[0] == len(dataset)
 
-paper_ids_idx_mapping = {data["ids"]: idx for idx, data in enumerate(dataset)}
+paper_ids_idx_mapping = {ids: idx for idx, ids in enumerate(dataset.keys())}
 
 ann_candidate_selector = ANNCandidateSelector(
     ann, 8, dataset, paper_ids_idx_mapping
@@ -81,15 +85,16 @@ ann_candidate_selector = ANNCandidateSelector(
 def to_device_dict(d, device):
     return {k: v.to(device) for k, v in d.items()}
 
-@app.route('/', method="GET")
+@app.route('/', methods=["GET"])
 def index():
     return render_template("index.html")
 
-@app.route('/recommend', method='POST')
+@app.route('/recommend', methods=['POST'])
+@torch.no_grad()
 def recommend():
     if request.method == 'POST':
-        title = request.json['title']
-        abstract = request.json['abstract']
+        title = request.form['title']
+        abstract = request.form['abstract']
 
         # TODO empty string for title and abstract
 
@@ -109,13 +114,16 @@ def recommend():
         candidates = ann_candidate_selector.get_candidate(query_embedding_numpy)
     
         result = [{
-            "title": dataset[c]["title"],
-            "abstract": dataset[c]["abstract"]
+            "title": dataset[c[0]]["title"],
+            "abstract": dataset[c[0]]["abstract"]
         } for c in candidates]
 
         return render_template("recommend.html", result=result)
 
     # A database for all paper
+
+if __name__ == '__main__':
+    app.run(debug=True)
 
 
 

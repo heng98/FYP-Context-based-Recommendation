@@ -1,15 +1,25 @@
 import torch
 import numpy as np
-import tqdm
+from tqdm import tqdm
 
 def to_device_dict(d, device):
     return {k: v.to(device) for k, v in d.items()}
 
 
 @torch.no_grad()
-def embed_documents(model, dataset, device, save_path=None, embedding_size=768):
+def embed_documents(model, dataset, tokenizer, device, save_path=None, embedding_size=768):
+    # print(dataset.values())
     doc_embedding_vectors = torch.empty(len(dataset), embedding_size)
-    for i, (encoded, _) in enumerate(tqdm(dataset)):
+    for i, data in enumerate(tqdm(dataset.values())):
+        encoded = tokenizer(
+            data["title"],
+            data["abstract"],
+            padding="max_length",
+            max_length=256,
+            truncation=True,
+            return_tensors="pt",
+        )
+
         encoded = to_device_dict(encoded, device)
 
         query_embedding = model(encoded)
