@@ -1,40 +1,17 @@
-import torch
-from transformers import AutoTokenizer
-
-from typing import NoReturn, List, Union, Dict, Any, Set
+import json
+from typing import List, Dict, Any
 import json
 import logging
-from collections import defaultdict
+
+import argparse
+from tqdm import tqdm
+from concurrent.futures import ProcessPoolExecutor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
-# logger.setLevel(logging.INFO)
-# console_handler = logging.StreamHandler()
-# console_handler.setLevel(logging.INFO)
-# logger.addHandler(console_handler)
 
 
 class FeatureExtractor:
-    def __init__(self, pretrained_path: str):
-        self.tokenizer = AutoTokenizer.from_pretrained(pretrained_path, use_fast=True)
-
-    def get_input(
-        self, title: Union[str, List[str]], abstract: Union[str, List[str]]
-    ) -> Dict[str, torch.Tensor]:
-        """Tokenization for all titles and abstracts
-
-        Args:
-        """
-        data = self.tokenizer(
-            title,
-            abstract,
-            padding="max_length",
-            max_length=512,
-            truncation=True,
-            return_tensors="pt",
-        )
-        return data
-
     @staticmethod
     def build_paper_ids_idx_mapping(papers: List[Dict[str, Any]]):
         mapping = dict()
@@ -50,86 +27,123 @@ class FeatureExtractor:
         return pos
 
     @staticmethod
-    def get_hard_neg(query_paper: str, network: Dict[str, Dict[str, Any]]) -> List[str]:
-        pos = set(network[query_paper]["pos"])
+    def get_hard_neg(
+        query_paper_idx: int,
+        paper_ids_idx_mapping: Dict[str, int],
+        all_papers: List[Dict[str, Any]],
+    ) -> List[str]:
+        query_paper = all_papers[query_paper_idx]
+        pos = set(query_paper["pos"])
         hard_neg = set()
+
         # Get postive of positive of query paper
-
         for p in pos:
-            if p in network:
-                hard_neg.update(network[p]["pos"])
-
+            if p in paper_ids_idx_mapping:
+                paper_idx = paper_ids_idx_mapping[p]
+                hard_neg.update(all_papers[paper_idx]["pos"])
             else:
                 logger.info(f"Abstract is not in paper with ids {p}")
 
         # Remove positive paper inside hard negative
         hard_neg = hard_neg - pos
-
         return list(hard_neg)
 
 
 if __name__ == "__main__":
-    feat = FeatureExtractor("allenai/scibert_scivocab_cased")
-    path = "./processed_aan_data/dataset.json"
-    papers = json.load(open(path, "r"))
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data_path", type=str, required=True)
+    parser.add_argument("--min_citation", type=int, default=-1)
+    parser.add_argument("--min_year", type=int, default=-1)
 
-    all_papers = papers["train"] + papers["test"]
-    titles = []
-    abstracts = []
-    for paper in all_papers:
-        titles.append(paper["title"])
-        abstracts.append(paper["abstract"])
+    parser.add_argument("--train_range", type=str, required=True)
+    parser.add_argument("--val_range", type=str, required=True)
+    parser.add_argument("--test_range", type=str, required=True)
 
-    encoded = feat.get_input(titles, abstracts)
-    paper_ids_idx_mapping = feat.build_paper_ids_idx_mapping(all_papers)
+    parser.add_argument("--save_dir", type=str, required=True)
 
-    torch.save(
-        {"encoded": encoded.data, "paper_ids_idx_mapping": paper_ids_idx_mapping},
-        "encoded.pth",
+    args = parser.parse_args()
+
+    feat = FeatureExtractor()
+    papers = json.load(open(args.data_path, "r"))
+
+    train_range = tuple(int(year) for year in args.train_range.split("_"))
+    val_range = tuple(int(year) for year in args.val_range.split("_"))
+    test_range = tuple(int(year) for year in args.test_range.split("_"))
+
+    logger.info(f"Training range: From {train_range[0]} to {train_range[1]} inclusive")
+    logger.info(f"Validation range: From {val_range[0]} to {val_range[1]} inclusive")
+    logger.info(f"Testing range: From {test_range[0]} to {test_range[1]} inclusive")
+
+    dataset_name = papers["name"]
+
+    all_paper = papers["papers"]
+    all_paper = list(
+        filter(
+            lambda x: (x["year"] >= args.min_year)
+            and (len(x["citations"]) >= args.min_citation),
+            papers["papers"],
+        )
     )
 
-    # Training Dataset
-    train_network = defaultdict(dict)
+    paper_ids_idx_mapping = feat.build_paper_ids_idx_mapping(all_paper)
 
-    # Mapping of ids -> idx
-    train_paper_ids_idx_mapping = {
-        paper["ids"]: paper_ids_idx_mapping[paper["ids"]] for paper in papers["train"]
-    }
+    def get_pos(p):
+        citations = p.pop("citations")
+        pos = [
+            c
+            for c in citations
+            if c in paper_ids_idx_mapping
+            and all_paper[paper_ids_idx_mapping[c]]["year"] <= p["year"]
+        ]
+        p["pos"] = pos
+        return p
 
-    # Get all the positive from dataset
-    for paper in papers["train"]:
-        train_network[paper["ids"]]["pos"] = feat.get_pos(paper)
+    def get_hard_neg(i):
+        hard_neg = feat.get_hard_neg(i, paper_ids_idx_mapping, all_paper)
+        all_paper[i]["hard_neg"] = hard_neg
 
-    # Get all the hard negative from network
-    for p in train_network.keys():
-        train_network[p]["hard"] = feat.get_hard_neg(p, train_network)
+        return all_paper[i]
 
-    torch.save(
-        {
-            "paper_ids_idx_mapping": train_paper_ids_idx_mapping,
-            "network": train_network,
-        },
-        f"train_file.pth",
+    with ProcessPoolExecutor() as executor:
+        all_paper = list(
+            tqdm(executor.map(get_pos, all_paper), total=len(all_paper))
+        )
+
+    logger.info("Extracting Hard Neg")
+    with ProcessPoolExecutor() as executor:
+        all_paper = list(
+            tqdm(
+                executor.map(
+                    get_hard_neg,
+                    range(len(all_paper)),
+                ),
+                total=len(all_paper),
+            )
+        )
+
+    # Train, val, test split
+    train_paper = list(
+        filter(lambda x: train_range[0] <= x["year"] <= train_range[1], all_paper)
+    )
+    val_paper = list(
+        filter(lambda x: val_range[0] <= x["year"] <= val_range[1], all_paper)
+    )
+    test_paper = list(
+        filter(lambda x: test_range[0] <= x["year"] <= test_range[1], all_paper)
     )
 
-    # Test Dataset
-    test_network = defaultdict(dict)
+    logger.info(f"Num of training paper: {len(train_paper)}")
+    logger.info(f"Num of validation paper: {len(val_paper)}")
+    logger.info(f"Num of testing paper: {len(test_paper)}")
 
-    # Mapping of ids -> idx
-    test_paper_ids_idx_mapping = {
-        paper["ids"]: paper_ids_idx_mapping[paper["ids"]] for paper in papers["test"]
-    }
-
-    for paper in papers["test"]:
-        test_network[paper["ids"]]["pos"] = feat.get_pos(paper)
-
-    for p in test_network.keys():
-        test_network[p]["hard"] = feat.get_hard_neg(p, test_network)
-
-    torch.save(
-        {
-            "paper_ids_idx_mapping": test_paper_ids_idx_mapping,
-            "network": test_network,
-        },
-        f"test_file.pth",
-    )
+    with open(f"{args.save_dir}/{dataset_name}_train_test_dataset_1.json", "w") as f:
+        json.dump(
+            {   
+                "name": dataset_name,
+                "train": train_paper,
+                "valid": val_paper,
+                "test": test_paper,
+            },
+            f,
+            indent=2,
+        )

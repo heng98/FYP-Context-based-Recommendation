@@ -2,14 +2,19 @@ import torch
 import numpy as np
 from sklearn.metrics import ndcg_score
 
+from torch.utils.data import DataLoader
 from model.embedding_model import EmbeddingModel
-from data.dataset import PaperDataset
+from model.reranker_model import SimpleReranker
+from data.dataset import PaperPosDataset
 from candidate_selector.ann.ann_annoy import ANNAnnoy
 from candidate_selector.ann.ann_candidate_selector import ANNCandidateSelector
+from ranker import Ranker
 
 import argparse
+import json
 from tqdm import tqdm
 import logging
+from transformers import AutoTokenizer, AutoModel
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -66,47 +71,70 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_name", type=str, default="allenai/scibert_scivocab_cased"
     )
+    parser.add_argument("--embedding_path", type=str)
+    parser.add_argument("--max_seq_len", type=int, default=256)
     parser.add_argument("--weight_path", type=str, required=True)
+
+
+    parser.add_argument("--reranker_weight_path", type=str)
     config = parser.parse_args()
 
+    device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+
     model = EmbeddingModel(config)
-    state_dict = torch.load(config.weight_path)["state_dict"]
-    temp_fix_state_dict = {}
-    for k, v in state_dict.items():
-        temp_fix_state_dict[k.replace("module.", "")] = v
-
-
-    model.load_state_dict(temp_fix_state_dict)
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    state_dict = torch.load(config.weight_path, map_location=device)["state_dict"]
+    model.load_state_dict(state_dict)
     model = model.to(device)
     
-    train_paper_dataset = PaperDataset("./train_file.pth", "./encoded.pth", config)
-    train_paper_pos_dataset = train_paper_dataset.get_paper_pos_dataset(
-        train_paper_dataset.paper_ids_idx_mapping
+    if config.reranker_weight_path:
+        reranker_model = SimpleReranker()
+        reranker_state_dict = torch.load(config.reranker_weight_path)["state_dict"]
+        reranker_model.load_state_dict(reranker_state_dict)
+        reranker_model = reranker_model.to(device)
+        reranker_model.eval()
+    
+    tokenizer = AutoTokenizer.from_pretrained(config.model_name)
+    with open("DBLP_train_test_dataset_1.json", "r") as f:
+        dataset = json.load(f)
+
+    train_idx_paper_idx_mapping = {data["ids"]: idx for idx, data in enumerate(dataset["train"])}
+    train_paper_pos_dataset = PaperPosDataset(
+        dataset["train"],
+        train_idx_paper_idx_mapping,
+        tokenizer
     )
 
-    test_paper_dataset = PaperDataset("./test_file.pth", "./encoded.pth", config)
-    test_paper_pos_dataset = test_paper_dataset.get_paper_pos_dataset(
-        train_paper_dataset.paper_ids_idx_mapping
+    test_paper_pos_dataset = PaperPosDataset(
+        dataset["test"],
+        train_idx_paper_idx_mapping,
+        tokenizer
     )
 
     model.eval()
     with torch.no_grad():
-        doc_embedding_vectors = torch.empty(len(train_paper_pos_dataset), 768)
-        for i, (encoded, _) in enumerate(tqdm(train_paper_pos_dataset)):
-            encoded = {k: v.unsqueeze(0) for k, v in encoded.items()}
-            encoded = to_device_dict(encoded, device)
-    
-            query_embedding = model(encoded)
-            doc_embedding_vectors[i] = query_embedding
+        if config.embedding_path:
+            logger.info("Load from embedding")
+            doc_embedding_vectors = torch.load(config.embedding_path)
+        else:
+            doc_embedding_vectors = torch.empty(len(train_paper_pos_dataset), 768)
+            for i, (encoded, _) in enumerate(tqdm(train_paper_pos_dataset)):
+                encoded = to_device_dict(encoded, device)
+        
+                query_embedding = model(encoded)
+                doc_embedding_vectors[i] = query_embedding
+
+            torch.save(doc_embedding_vectors, "embedding_dblp_2.pth")
 
         doc_embedding_vectors = doc_embedding_vectors.cpu().numpy()
         logger.info("Building Annoy Index")
         ann = ANNAnnoy.build_graph(doc_embedding_vectors)
+        # 8
         ann_candidate_selector = ANNCandidateSelector(
-            ann, 5, train_paper_pos_dataset
+            ann, 8, train_paper_pos_dataset, train_idx_paper_idx_mapping
         )
+        if config.reranker_weight_path:
+            ranker = Ranker(reranker_model, doc_embedding_vectors, device)
+
         mrr_list = []
         p_list = []
         r_list = []
@@ -116,16 +144,23 @@ if __name__ == "__main__":
         logger.info("Evaluating")
         skipped = 0
         for i, (query, positive) in enumerate(tqdm(test_paper_pos_dataset)):
-            if not positive:
+            if len(positive) < 10:
                 skipped += 1
                 continue
 
-            query = {k: v.unsqueeze(0) for k, v in query.items()}
             query = to_device_dict(query, device)
-            query_embedding = model(query).cpu().numpy()[0]
+            query_embedding = model(query)
+            query_embedding_numpy = query_embedding.clone().cpu().numpy()[0]
 
-            # Check if top_k is sorted or not
-            candidates = ann_candidate_selector.get_candidate(query_embedding)
+            candidates = ann_candidate_selector.get_candidate(query_embedding_numpy)
+           
+            if config.reranker_weight_path:
+                candidates = ranker.rank(query_embedding, candidates)
+
+            # logger.info(dataset["test"][i])
+            # for c in candidates:
+            #     logger.info(dataset["train"][c[0]]["title"])
+            
 
             mrr_score, precision, recall, f1, ndcg_value = eval_score(candidates, positive, k=20)
 
@@ -135,6 +170,7 @@ if __name__ == "__main__":
             r_list.append(recall)
             f1_list.append(f1)
             ndcg_list.append(ndcg_value)
+            # break
 
         logger.info(f"Skipped: {skipped}")
 
@@ -142,4 +178,8 @@ if __name__ == "__main__":
         logger.info(
             f"MRR: {sum(mrr_list) / len(mrr_list)}, P@5: {sum(p_list) / len(p_list)}, "
             + f"R@5: {sum(r_list) / len(r_list)}, f1@5: {sum(f1_list) / len(f1_list)}"
+        )
+        logger.info(
+            f"MRR: {np.mean(mrr_list)}, P@5: {np.mean(p_list)}, "
+            + f"R@5: {np.mean(r_list)}, f1@5: {np.mean(f1_list)}"
         )

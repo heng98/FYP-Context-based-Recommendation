@@ -18,7 +18,7 @@ def init_distributed_mode(config):
     dist.init_process_group(backend='nccl')
 
 def reduce_mean(tensor):
-    rt = tensor.clone().detach()
+    rt = tensor.detach().clone()
     dist.reduce(rt, 0)
     rt /= dist.get_world_size()
 

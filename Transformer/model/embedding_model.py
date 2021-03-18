@@ -13,12 +13,14 @@ class EmbeddingModel(nn.Module):
             self.config.model_name, add_pooling_layer=False, return_dict=True
         )
 
+        self.register_buffer("position_ids", torch.arange(config.max_seq_len).expand((1, -1)))
+
     def forward(self, input: Dict[str, torch.Tensor]) -> torch.Tensor:
         output = self.model(
             input_ids=input["input_ids"],
             attention_mask=input["attention_mask"],
             token_type_ids=input["token_type_ids"],
-            position_ids=torch.arange(512).expand((1, -1)).cuda(),
+            position_ids=self.position_ids.clone(),
         )
         doc_embedding = output["last_hidden_state"][:, 0]
 
