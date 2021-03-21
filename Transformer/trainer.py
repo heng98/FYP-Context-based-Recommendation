@@ -2,11 +2,14 @@ import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from transformers import AdamW, get_linear_schedule_with_warmup
+from transformers import AdamW, get_linear_schedule_with_warmup, Adafactor
 
 from utils import distributed
-
+import logging
 from tqdm import tqdm
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger()
 
 
 class Trainer:
@@ -16,7 +19,7 @@ class Trainer:
         self.model = model.to(self.device)
         if args.distributed:
             self.model = torch.nn.parallel.DistributedDataParallel(
-                self.model, device_ids=[args.local_rank]
+                self.model, device_ids=[args.local_rank], find_unused_parameters=True
             )
 
         self.train_dataset = train_dataset
@@ -59,9 +62,11 @@ class Trainer:
 
         tr_loss = torch.tensor(0.0).to(self.device)
         for epoch in range(self.args.num_epoch):
+            
             self.model.train()
 
             if distributed.is_main_process():
+                logger.info(f"Training epoch {epoch}")
                 train_dataloader = tqdm(train_dataloader)
 
             for step, inputs in enumerate(train_dataloader):
@@ -71,16 +76,17 @@ class Trainer:
                 else:
                     tr_loss += self.training_step(inputs)
 
+                # Update steps
                 if (step + 1) % self.args.gradient_accumulation_steps == 0:
                     self.global_step += 1
                     self.optimizer.step()
                     self.scheduler.step()
                     self.optimizer.zero_grad()
 
-                if (self.global_step + 1) % self.args.logging_steps == 0:
-                    tr_loss_scalar = tr_loss.item() / self.args.logging_steps
-                    tr_loss -= tr_loss
-                    self.log({"embedding/train_loss": tr_loss_scalar})
+                    if self.global_step % self.args.logging_steps == 0:
+                        tr_loss_scalar = tr_loss.item() / self.args.logging_steps
+                        tr_loss -= tr_loss
+                        self.log({"embedding/train_loss": tr_loss_scalar})
 
             eval_loss = self.evaluate()
             self.log({"embedding/eval_loss": eval_loss.item()})
@@ -88,6 +94,8 @@ class Trainer:
 
     @torch.no_grad()
     def evaluate(self):
+        if distributed.is_main_process():
+            logger.info("Evaluation")
         self.model.eval()
         eval_dataloader = self.get_eval_dataloader()
         eval_loss = torch.tensor(0.0).to(self.device)
@@ -108,7 +116,7 @@ class Trainer:
             collate_fn=self.data_collater,
             pin_memory=True,
             drop_last=True,
-            num_workers=1,
+            num_workers=4,
         )
 
         return dataloader
@@ -120,7 +128,7 @@ class Trainer:
             collate_fn=self.data_collater,
             pin_memory=True,
             drop_last=True,
-            num_workers=1,
+            num_workers=4,
         )
 
         if distributed.is_main_process():

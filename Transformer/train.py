@@ -33,13 +33,13 @@ if __name__ == "__main__":
 
     # train_paper_ids = list(train_dataset.keys())
     # val_paper_ids = list(val_dataset.keys())
-    with open("train_ids.pkl", "rb") as g:
+    with open("Dataset/processed/s2orc_cs/train_ids.pkl", "rb") as g:
         meta = pickle.load(g)
 
     hf_dataset = datasets.load_dataset(
         'json',
         name="cs_paper",
-        data_files=["s2orc_train.json", "s2orc_val.json"],
+        data_files=["Dataset/processed/s2orc_cs/s2orc_train.json", "Dataset/processed/s2orc_cs/s2orc_val.json"],
         split='train'
     )
     dataset = S2ORCCorpus(hf_dataset, meta["paper_ids_idx_mapping"])
