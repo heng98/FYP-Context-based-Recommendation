@@ -1,5 +1,6 @@
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
+from torch.utils.data.distributed import DistributedSampler
 from torch.utils.tensorboard import SummaryWriter
 
 from transformers import AdamW, get_linear_schedule_with_warmup
@@ -59,6 +60,8 @@ class Trainer:
 
         tr_loss = torch.tensor(0.0).to(self.device)
         for epoch in range(self.args.num_epoch):
+            if self.args.local_rank != -1:
+                self.sampler.set_epoch(epoch)
             self.model.train()
 
             if distributed.is_main_process():
@@ -102,6 +105,9 @@ class Trainer:
         return eval_loss
 
     def get_train_dataloader(self):
+        self.sampler = None
+        if isinstance(self.train_dataset, Dataset):
+            self.sampler = DistributedSampler(self.train_dataset)
         dataloader = DataLoader(
             self.train_dataset,
             self.args.batch_size,
@@ -109,11 +115,15 @@ class Trainer:
             pin_memory=True,
             drop_last=True,
             num_workers=1,
+            sampler=self.sampler
         )
 
         return dataloader
 
     def get_eval_dataloader(self):
+        sampler = None
+        if isinstance(self.train_dataset, Dataset):
+            sampler = DistributedSampler(self.eval_dataset, shuffle=False)
         dataloader = DataLoader(
             self.eval_dataset,
             self.args.batch_size,
@@ -121,6 +131,7 @@ class Trainer:
             pin_memory=True,
             drop_last=True,
             num_workers=1,
+            sampler=sampler
         )
 
         if distributed.is_main_process():

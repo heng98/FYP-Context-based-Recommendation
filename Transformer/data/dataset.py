@@ -247,7 +247,7 @@ class GroupedTrainedDataset(Dataset):
         negative_ids = self.dataset[index]["negative_ids"]
 
         if len(positive_ids) == 0:
-            positive_ids = self.corpus[query_id]["citations"]
+            positive_ids = self.corpus[query_id]["pos"]
 
         query_abstract = self.corpus[query_id]["abstract"]
         positive_abstract = self.corpus[random.choice(positive_ids)]["abstract"]
@@ -275,21 +275,38 @@ class GroupedTrainedDataset(Dataset):
 
 
 class GroupedTrainedCollater:
-    def __init__(self, tokenizer):
+    def __init__(self, tokenizer, args):
         self.tokenizer = tokenizer
+        self.args = args
 
     def __call__(self, batch):
         query_abstract = [data[0] for group in batch for data in group]
         candidate_abstract = [data[1] for group in batch for data in group]
 
-        return self._encode(query_abstract, candidate_abstract)
+        return {"encoded": self._encode(query_abstract, candidate_abstract)}
 
     def _encode(self, query_abstract: List[str], candidate_abstract: List[str]):
-        return self.tokenizer(
+        query_encoded = self.tokenizer(
             query_abstract,
-            candidate_abstract,
             padding="max_length",
-            max_length=self.max_seq_len,
-            truncation="only_second",
+            max_length=self.args.max_seq_len // 2,
+            truncation=True,
             return_tensors="pt",
         )
+        candidate_encoded = self.tokenizer(
+            candidate_abstract,
+            padding="max_length",
+            max_length=self.args.max_seq_len // 2,
+            truncation=True,
+            return_tensors="pt",
+        )
+        candidate_encoded["input_ids"][:, 0] = self.tokenizer.sep_token_id
+
+        keys = query_encoded.keys()
+
+        encoded = dict()
+        for k in keys:
+            encoded[k] = torch.cat([query_encoded[k], candidate_encoded[k]], axis=1)
+
+        return encoded
+

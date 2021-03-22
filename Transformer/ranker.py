@@ -123,32 +123,21 @@ class Ranker:
 
 
 class TransformerRanker:
-    def __init__(self, reranker_model, device, tokenizer):
+    def __init__(self, reranker_model, device, tokenizer, args):
         self.reranker_model = reranker_model
         self.device = device
         self.tokenizer = tokenizer
+        self.args = args
 
     def rank(self, query, candidates):
-        query_text = query["title"] + query["abstract"]
-        candidates_text = [c["title"] + c["abstract"] for c in candidates]
+        query_text = query["abstract"]
+        candidates_text = [c["abstract"] for c in candidates]
         candidates_ids = [c["ids"] for c in candidates]
 
-        query_encoded = self._encode(query_text)
-        candidates_encoded = self._encode(candidates_text)
-        candidates_encoded["input_ids"][:, 0] = self.tokenizer.sep_token_id
-
-        for k in query_encoded:
-            query_encoded[k] = query_encoded[k].expand_as(candidates_encoded[k])
-
-        combined_encoded = {
-            k: torch.cat([query_encoded[k], candidates_encoded[k]], axis=1).to(
-                self.device
-            )
-            for k in query_encoded
-        }
+        encoded = self._encode(query_text, candidates_text)
 
         similarity = torch.flatten(
-            torch.sigmoid(self.reranker_model(**combined_encoded)["logits"])
+            torch.sigmoid(self.reranker_model(**encoded)["logits"])
         )
         sorted_sim, indices = torch.sort(similarity, descending=True)
 
@@ -161,11 +150,33 @@ class TransformerRanker:
 
         return reranked_candidates
 
-    def _encode(self, text):
-        return self.tokenizer(
-            text,
+    def _encode(self, query_abstract, candidate_abstract):
+        query_encoded = self.tokenizer(
+            query_abstract,
             padding="max_length",
-            max_length=256,
+            max_length=self.args.max_seq_len // 2,
             truncation=True,
             return_tensors="pt",
         )
+        candidate_encoded = self.tokenizer(
+            candidate_abstract,
+            padding="max_length",
+            max_length=self.args.max_seq_len // 2,
+            truncation=True,
+            return_tensors="pt",
+        )
+        candidate_encoded["input_ids"][:, 0] = self.tokenizer.sep_token_id
+
+        keys = query_encoded.keys()
+
+        encoded = dict()
+        for k in keys:
+            encoded[k] = torch.cat(
+                [
+                    query_encoded[k].expand(len(candidate_abstract), -1),
+                    candidate_encoded[k]
+                ],
+                axis=1
+            ).to(self.device)
+
+        return encoded

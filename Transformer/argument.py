@@ -25,5 +25,9 @@ def get_args():
 
     parser.add_argument("--local_rank", type=int, default=-1)
     
+    parser.add_argument("--group_size", type=int, default=8)
+
+
+
     args = parser.parse_args()
     return args

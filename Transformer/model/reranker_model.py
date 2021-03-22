@@ -110,10 +110,10 @@ class TransformerRanker(nn.Module):
         super(TransformerRanker, self).__init__()
         self.args = args
 
-        self.model = AutoModelForSequenceClassification(
+        self.model = AutoModelForSequenceClassification.from_pretrained(
             args.pretrained_model,
             return_dict=True,
-            num_labels=1
+            num_labels=1,
         )
 
         self.criterion = nn.CrossEntropyLoss()
@@ -122,14 +122,17 @@ class TransformerRanker(nn.Module):
             torch.zeros(self.args.batch_size, dtype=torch.long)
         )
 
-    def forward(self, inputs):
-        logits = self.model(**inputs)["logits"]
-
+    def forward(self, encoded):
+        logits = self.model(**encoded)["logits"]
+        
         scores = logits.view(
             self.args.batch_size,
-            self.args.train_group_size
+            self.args.group_size
         )
 
         loss = self.criterion(scores, self.label)
 
         return loss
+
+    def save_pretrained(self, path):
+        self.model.save_pretrained(path)

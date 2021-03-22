@@ -10,6 +10,7 @@ from ranker import Ranker, TransformerRanker
 
 import argparse
 import json
+from collections import defaultdict
 from tqdm import tqdm
 import logging
 from transformers import AutoTokenizer, AutoModel, AutoModelForSequenceClassification
@@ -87,17 +88,17 @@ if __name__ == "__main__":
     model = model.to(device)
     
     if config.reranker_weight_path:
-        # reranker_model = AutoModelForSequenceClassification.from_pretrained(
-        #     config.reranker_weight_path,
-        #     return_dict=True,
-        #     num_labels=1
-        # )
-        reranker_model = SimpleReranker()
+        reranker_model = AutoModelForSequenceClassification.from_pretrained(
+            config.reranker_weight_path,
+            return_dict=True,
+            num_labels=1
+        )
+        # reranker_model = SimpleReranker()
         reranker_model = reranker_model.to(ranker_device)
         reranker_model.eval()
     
     tokenizer = AutoTokenizer.from_pretrained("allenai/cs_roberta_base")
-    with open("DBLP_train_test_dataset_1.json", "r") as f:
+    with open("DBLP_train_test_dataset.json", "r") as f:
         dataset = json.load(f)
 
     train_paper_ids_idx_mapping = {ids: idx for idx, ids in enumerate(dataset["train"])}
@@ -136,8 +137,8 @@ if __name__ == "__main__":
             ann, 8, dataset["train"], train_paper_ids_idx_mapping
         )
         if config.reranker_weight_path:
-            ranker = Ranker(reranker_model, doc_embedding_vectors, ranker_device, "cc.en.300.bin")
-            # ranker = TransformerRanker(reranker_model, ranker_device, tokenizer)
+            # ranker = Ranker(reranker_model, doc_embedding_vectors, ranker_device, "cc.en.300.bin")
+            ranker = TransformerRanker(reranker_model, ranker_device, tokenizer, config)
 
         mrr_list = []
         p_list = []
@@ -147,6 +148,7 @@ if __name__ == "__main__":
 
         logger.info("Evaluating")
         skipped = 0
+        result = []
         for i, query_data in enumerate(tqdm(dataset["test"].values())):
             pos = set(query_data["pos"]) & set(dataset["train"])
             if len(pos) < 10:
@@ -170,11 +172,17 @@ if __name__ == "__main__":
             candidates = ann_candidate_selector.get_candidate(query_embedding_numpy)
             candidates_idx = [(train_paper_ids_idx_mapping[c[0]], c[1]) for c in candidates]
             if config.reranker_weight_path:
-                candidates = ranker.rank(
-                    query_embedding, candidates_idx, query_data, [dataset["train"][c[0]] for c in candidates]
-                )
-                # candidates = ranker.rank(query_data, [dataset["train"][c[0]] for c in candidates])
+                # candidates = ranker.rank(
+                #     query_embedding, candidates_idx, query_data, [dataset["train"][c[0]] for c in candidates]
+                # )
+                candidates = ranker.rank(query_data, [dataset["train"][c[0]] for c in candidates])
 
+            print(candidates)
+            result.append({
+                "query_ids": query_data["ids"], 
+                "positive_ids": [c[0] for c in candidates if c[0] in pos],
+                "negative_ids": [c[0] for c in candidates if (c[0] not in pos) and (c[0] != query_data["ids"])]
+            })
             
             mrr_score, precision, recall, f1, ndcg_value = eval_score(candidates, pos, k=20)
 
@@ -197,3 +205,6 @@ if __name__ == "__main__":
             f"MRR: {np.mean(mrr_list)}, P@5: {np.mean(p_list)}, "
             + f"R@5: {np.mean(r_list)}, f1@5: {np.mean(f1_list)}"
         )
+
+        # with open("val_result.json", "w") as f:
+        #     json.dump(result, f)
