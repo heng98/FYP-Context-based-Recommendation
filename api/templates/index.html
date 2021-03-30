@@ -1,22 +1,30 @@
 <html>
-    <head>
-    </head>
-    <body>
-        <form id='login' action="/recommend" method='POST'>
-            <div>            
-                <label for='title'>Username</label>
-                <br>
-                <input name='title' required>
-            </div>
-            <div>
-                <label for="abstract">Password</label>
-                <br>
-                <input name='abstract' required>
-            </div>
-            <div>
-                <button type='submit'>Recommend</button>
-            </div>
-            
-        </form>
-    </body>
+
+<head>
+    <!-- <link rel="stylesheet" href="{{ url_for("static", filename="css/index.css") }}"> -->
+    <link rel="stylesheet" href="../static/css/index.css">
+
+</head>
+
+<body>
+    <div id="container">
+        <div>
+            <label for="title">Title</label>
+            <br>
+            <textarea name="title" id="title-input" rows="1"></textarea>
+        </div>
+        <div>
+            <label for="abstract">Abstract</label>
+            <br>
+            <textarea name="abstract" id="abstract-input" rows="10"></textarea>
+        </div>
+        <div>
+            <button id="recommend-button">Recommend</button>
+        </div>
+
+    </div>
+    <div id="recommendation"></div>
+    <script src="../static/js/recommend.js"></script>
+</body>
+
 </html>
