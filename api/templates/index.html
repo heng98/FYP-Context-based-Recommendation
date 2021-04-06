@@ -1,0 +1,32 @@
+<html>
+
+<head>
+    <!-- <link rel="stylesheet" href="{{ url_for("static", filename="css/index.css") }}"> -->
+    <link rel="stylesheet" href="../static/css/index.css">
+
+</head>
+<body>
+    <div id="header">
+        <h1>Citomation</h1>
+        <span>Papers: {{paper_count}}</span>
+        <span>Citation Links: {{citation_count}}</span>
+    </div>
+    <div id="container">
+        <div>
+            <label for="title">Title</label>
+            <textarea name="title" id="title-input" rows="1"></textarea>
+        </div>
+        <div>
+            <label for="abstract">Abstract</label>
+            <textarea name="abstract" id="abstract-input" rows="10"></textarea>
+        </div>
+        <div>
+            <button id="recommend-button">Recommend Paper</button>
+        </div>
+
+    </div>
+    <div id="recommendation"></div>
+    <script src="../static/js/recommend.js"></script>
+</body>
+
+</html>

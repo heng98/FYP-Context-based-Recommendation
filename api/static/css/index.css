@@ -1,0 +1,85 @@
+body {
+    margin: 0;
+    font-family: sans-serif;
+}
+
+#header {
+    padding: 10px 20px;
+    background-color: #BB86FC;
+}
+
+#header h1 {
+    margin: 0;
+    padding: 0;
+}
+
+#container {
+    padding-top: 10px;
+    margin-left: 20px;
+    margin-right: 1%;
+    width: 40%;
+    display: inline-block;
+    position: sticky;
+    top: 0;
+}
+
+#container div{
+    margin-bottom: 20px;
+}
+
+#abstract-input {
+    height: 40%;
+}
+
+label {
+    font-size: 20px;
+    padding-left: 7px;
+    /* margin-bottom: 20px; */
+}
+
+textarea {
+    width: 100%;
+    resize: none;
+    padding: 10px;
+    border-radius: 10px;
+    font-size: 15px;
+    outline: none;
+}
+
+#recommendation {
+    padding-top: 10px;
+    display: inline-block;
+    width: 50%;
+    vertical-align: top;
+    overflow-y: auto;
+}
+
+.paper {
+    margin: 10px;
+    padding: 15px;
+    background-color: whitesmoke;
+    box-shadow: 5px 5px 10px #888888;
+    width: 60%
+}
+
+.title {
+    font-size: 18px;
+    font-weight: bold;
+}
+
+.abstract {
+    text-align: justify;
+    text-justify: inter-word;
+    
+}
+
+#recommend-button {
+    width: 100%;
+    font-size: 20px;
+    border-radius: 15px;
+    outline: none;
+    border: 0px;
+    padding: 5px;
+    background-color: #4a148c;
+    color: white;
+}
