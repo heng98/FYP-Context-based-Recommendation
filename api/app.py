@@ -15,15 +15,18 @@ from api.candidate_selection.ann_candidate_selector import ANNCandidateSelector
 app = Flask(__name__)
 
 corpus = Corpus()
-document_embedding_model = DocumentEmbeddingModel("weights_3")
+document_embedding_model = DocumentEmbeddingModel("weights/s2orc_cs/weights_0")
 
-ann = ANNAnnoy.load("dblp.ann")
+ann = ANNAnnoy.load("ann/s2orc_cs/weights_0/s2orc-cs-train-val.ann")
 candidate_selector = ANNCandidateSelector(ann, 8, corpus)
 
 
 @app.route('/', methods=["GET"])
 def index():
-    return render_template("index.html")
+    paper_count, citation_count = corpus.get_stats()
+    paper_count = format(paper_count, ",")
+    citation_count = format(citation_count, ",")
+    return render_template("index.html", paper_count=paper_count, citation_count=citation_count)
 
 @app.route('/recommend', methods=["POST"])
 def recommend():
@@ -38,7 +41,7 @@ def recommend():
                 "title": c["title"],
                 "abstract": c["abstract"]
             }
-            for c, _ in candidate_papers
+            for c, _ in candidate_papers[:30]
         ]
 
         return jsonify(result)

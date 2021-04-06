@@ -1,9 +1,9 @@
 import sqlite3
 from contextlib import closing
 
-connection = sqlite3.connect("image.db", check_same_thread=False)
-connection.executescript(open("api/schema.sql").read())
-connection.commit()
+connection = sqlite3.connect("s2orc.db", check_same_thread=False)
+# connection.executescript(open("api/schema.sql").read())
+# connection.commit()
 
 
 class Corpus:
@@ -83,3 +83,23 @@ class Corpus:
         paper_ids_list = [r[0] for r in query_result]
 
         return paper_ids_list
+
+    def get_stats(self):
+        query_paper = """
+        SELECT COUNT(*)
+        FROM Paper
+        """
+
+        query_ciation ="""
+        SELECT COUNT(*)
+        FROM Citations
+        """
+
+        with closing(connection.cursor()) as c:
+            c.execute(query_paper)
+            paper_count = c.fetchone()
+
+            c.execute(query_ciation)
+            citation_count = c.fetchone()
+
+        return paper_count[0], citation_count[0]

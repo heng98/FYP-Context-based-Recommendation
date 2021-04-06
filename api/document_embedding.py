@@ -3,7 +3,7 @@ import torch
 
 class DocumentEmbeddingModel:
     def __init__(self, model_path):
-        self.model = AutoModel.from_pretrained(model_path)
+        self.model = AutoModel.from_pretrained(model_path, return_dict=True, add_pooling_layer=False)
         self.tokenizer = AutoTokenizer.from_pretrained("allenai/cs_roberta_base")
         
         self.device = torch.device("cuda:0")
@@ -20,10 +20,9 @@ class DocumentEmbeddingModel:
             truncation=True,
             return_tensors="pt",
         )
-        print(encoded_query["input_ids"])
         encoded_query = {k: v.to(self.device) for k, v in encoded_query.items()}
         query_embedding = self.model(**encoded_query)[
             "last_hidden_state"
         ][:, 0]
-
+        torch.cuda.empty_cache()
         return query_embedding.cpu().numpy()[0]
