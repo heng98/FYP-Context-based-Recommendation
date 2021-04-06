@@ -3,32 +3,48 @@ import numpy as np
 
 class ANNCandidateSelector:
     def __init__(
-        self, ann, neighbour_candidate, train_paper_dataset, ids_idx, extend_candidate=True
+        self,
+        ann,
+        num_neighbour_candidate,
+        corpus,
+        paper_ids_idx_mapping,
+        candidate_pool,
+        extend_candidate=True,
     ):
         self.ann = ann
-        self.neighbour_candidate = neighbour_candidate
+        self.num_neighbour_candidate = num_neighbour_candidate
         self.extend_candidate = extend_candidate
 
-        self.train_paper_dataset = train_paper_dataset
-        self.candidate = set(train_paper_dataset)
-        self.ids_idx = ids_idx
-        self.idx_ids = list(ids_idx.keys())
+        self.corpus = corpus
+        self.paper_ids_idx_mapping = paper_ids_idx_mapping
+        self.candidate_pool = candidate_pool
+
+        self.idx_paper_ids_mapping = list(self.paper_ids_idx_mapping.keys())
 
     def get_candidate(self, query_embedding):
         candidate = self.ann.get_k_nearest_neighbour(
-            query_embedding, self.neighbour_candidate
+            query_embedding, self.num_neighbour_candidate
         )
         if self.extend_candidate:
             candidate_set = set(candidate)
             for i in candidate:
-                citation_of_nn = self.train_paper_dataset[self.idx_ids[i]]["pos"]
-                candidate_set.update([self.ids_idx[c] for c in citation_of_nn if c in self.candidate])
+                citation_of_nn = self.corpus[self.paper_ids_idx_mapping[i]]["pos"]
+                candidate_set.update(
+                    [
+                        self.paper_ids_idx_mapping[c]
+                        for c in citation_of_nn
+                        if c in self.candidate_pool
+                    ]
+                )
 
             candidate = list(candidate_set)
 
         similarity = self._get_similarity(query_embedding, candidate)
 
-        result = [(self.idx_ids[idx], sim) for idx, sim in zip(candidate, similarity)]
+        result = [
+            (self.idx_paper_ids_mapping[idx], sim)
+            for idx, sim in zip(candidate, similarity)
+        ]
         result = sorted(result, key=lambda x: x[1])
 
         return result

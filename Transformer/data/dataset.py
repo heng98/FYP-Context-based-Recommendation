@@ -191,12 +191,12 @@ class TripletIterableDataset(IterableDataset):
 
         self.nn_hard = nn_hard
         self.doc_embedding = doc_embedding
-        self.triplet_generator = self._build_triplet_generator()
 
         self.preprocessor = (
             preprocessor if preprocessor is not None else DefaultPreprocessor()
         )
         self._yielded = 0
+        self.length = self.triplets_per_epoch
 
     def _build_triplet_generator(self):
         triplet_generator = TripletGenerator(
@@ -207,10 +207,20 @@ class TripletIterableDataset(IterableDataset):
         return triplet_generator.generate_triplets()
 
     def __iter__(self):
+        worker_info = get_worker_info()
+        if worker_info is not None:
+            worker_id = worker_info.id
+            num_workers = worker_info.num_workers
+
+            split_size = (len(self.query_paper_ids) // num_workers) + 1
+            self.length //= num_workers
+            self.query_paper_ids = self.query_paper_ids[worker_id * split_size: (worker_id + 1) * split_size]
+        
+        self.triplet_generator = self._build_triplet_generator()
         return self
 
     def __next__(self):
-        if self._yielded == len(self):
+        if self._yielded >= len(self):
             self._yielded = 0
             raise StopIteration
 
@@ -230,7 +240,7 @@ class TripletIterableDataset(IterableDataset):
         return self.preprocessor(query_paper, pos_paper, neg_paper, margin)
 
     def __len__(self):
-        return self.triplets_per_epoch
+        return self.length
 
 
 # Dataset {query_ids:"", neg_ids: ["", ""]}
