@@ -11,7 +11,7 @@ with open("Dataset/dblp/corpus.json", "r") as f:
         if ("abstract" in data) and ("title" in data):
             paper = PaperDataModel(
                 ids=data["id"],
-                title=data["title_raw"],
+                title=data["title_raw"][:-1] if data["title_raw"][-1] == "." else data["title_raw"],
                 abstract=data["abstract_raw"],
                 citations=data["out_citations"],
                 year=data["year"],
