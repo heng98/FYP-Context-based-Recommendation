@@ -28,7 +28,7 @@ class ANNCandidateSelector:
         if self.extend_candidate:
             candidate_set = set(candidate)
             for i in candidate:
-                citation_of_nn = self.corpus[self.paper_ids_idx_mapping[i]]["pos"]
+                citation_of_nn = self.corpus[self.idx_paper_ids_mapping[i]]["pos"]
                 candidate_set.update(
                     [
                         self.paper_ids_idx_mapping[c]

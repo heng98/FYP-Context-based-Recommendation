@@ -1,5 +1,5 @@
 import torch
-from torch.utils import DataLoader
+from torch.utils.data import DataLoader
 
 import numpy as np
 from sklearn.metrics import ndcg_score
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-class TripletCollater:
+class Collater:
     def __init__(self, tokenizer, max_seq_len):
         self.tokenizer = tokenizer
         self.max_seq_len = max_seq_len
@@ -99,7 +99,7 @@ if __name__ == "__main__":
         dataloader = DataLoader(
             hf_dataset[: len(candidate_pool)],
             batch_size=8,
-            collate_fn=TripletCollater(tokenizer, 256),
+            collate_fn=Collater(tokenizer, 256),
             num_workers=8,
         )
 
@@ -124,7 +124,7 @@ if __name__ == "__main__":
     )
 
     test_data = []
-    with open("", "r") as f:
+    with open("Dataset/processed/s2orc_cs/s2orc_test.json", "r") as f:
         for line in f:
             test_data.append(json.loads(line))
 
@@ -138,3 +138,10 @@ if __name__ == "__main__":
     )
 
     evaluator.evaluate(test_data)
+    
+    # title = "Context-based Recommendation"
+    # abstract = "With the rapid growth of the scientific literature, citation recommendation systems able to speed up literature review and citing process during a research process. Recent approaches use bag-of-word retrieval to represent the documents, which discards word order information which is important in representation learning for documents. This project presents a method of recommend candidate references using document representations based on context of each document by learning document representations that incorporate inter-document document relatedness using citation graph and the state-of-the-art Transformer language model. Documents can be embedded into a high-dimensional vector space. Given a query document, it can be encoded into a vector which its nearest neighbours could be retrieved as candidates for citation. A recommendation web application is implemented to facilitate the citation recommendation."
+
+    # recommendation = evaluator.recommend(title, abstract)
+    # for p in recommendation:
+    #     print(dataset[p[0]]["title"])

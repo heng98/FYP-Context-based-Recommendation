@@ -32,6 +32,17 @@ def precision_recall_f1(predicted, actual, k=20):
 
     return precision, recall, f1
 
+def average_precision(predicted, actual, k=20):
+    predicted_k = predicted[:k]
+
+    score = 0
+    num_correct = 0
+    for idx, value in enumerate(predicted_k):
+        if value:
+            num_correct += 1
+            score += num_correct / (idx + 1)
+
+    return score / min(len(actual), k)
 
 class Evaluator:
     def __init__(
@@ -67,7 +78,7 @@ class Evaluator:
 
             candidates = self.get_candidate(query)
 
-            score = self.eval_score(candidates, pos, [1, 5, 10, 20])
+            score = self.eval_score(candidates, pos, [20])
             for k, v in score.items():
                 average_scores[k].append(v)
 
@@ -116,8 +127,19 @@ class Evaluator:
 
         for k in k_list:
             precision, recall, f1 = precision_recall_f1(correct, actual, k=k)
+            ap = average_precision(correct, actual, k=k)
             scores[f"precision@{k}"] = precision
             scores[f"recall@{k}"] = recall
             scores[f"f1@{k}"] = f1
+            scores[f"map@{k}"] = ap
 
         return scores
+
+    def recommend(self, title, abstract):
+        recommendation = self.get_candidate(
+            {
+                "title": title,
+                "abstract": abstract
+            }
+        )
+        return recommendation
